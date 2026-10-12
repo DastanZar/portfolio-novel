@@ -1,0 +1,90 @@
+{
+  "project": "cache-roof",
+  "timestamp_utc": "2026-10-12T08:17:44.475045+00:00",
+  "peaks": {
+    "peak_gflops": 23.67322565628881,
+    "bw_dram_gbps": 1.7203746263439026,
+    "bw_l2_gbps": 6.88149850537561
+  },
+  "kernels": [
+    {
+      "name": "vec-add",
+      "oi_dram": 0.08333333333333333,
+      "achieved_gflops": 0.11690259581339453,
+      "achieved_ci": [
+        0.11044574827629583,
+        0.12416127661963985
+      ],
+      "roof_gflops": 0.1433645521953252,
+      "classic_gflops": 0.1433645521953252,
+      "bound": "memory",
+      "l2_hit_rate": 0.0,
+      "grade_pct": 81.54219018807527,
+      "grade_ci": [
+        77.03839379055182,
+        86.60528332727459
+      ],
+      "verdict": "at-roof: well tuned"
+    },
+    {
+      "name": "matmul-512",
+      "oi_dram": 128.0,
+      "achieved_gflops": 15.50918950775087,
+      "achieved_ci": [
+        14.087735514963086,
+        17.249684483494057
+      ],
+      "roof_gflops": 23.67322565628881,
+      "classic_gflops": 23.67322565628881,
+      "bound": "compute",
+      "l2_hit_rate": 0.3333333333333333,
+      "grade_pct": 65.51363017836499,
+      "grade_ci": [
+        59.50915063077037,
+        72.86579671879934
+      ],
+      "verdict": "compute-bound: moderate headroom"
+    },
+    {
+      "name": "q-gemv-dequant",
+      "oi_dram": 3.0,
+      "achieved_gflops": 0.28451956485576274,
+      "achieved_ci": [
+        0.24859008478420228,
+        0.33258977536451
+      ],
+      "roof_gflops": 8.585105347837018,
+      "classic_gflops": 5.161123879031708,
+      "bound": "memory",
+      "l2_hit_rate": 0.007751937984496124,
+      "grade_pct": 3.314106855164524,
+      "grade_ci": [
+        2.895597371403643,
+        3.8740325469425323
+      ],
+      "verdict": "overhead-bound: likely launch/scheduling overhead, not BW"
+    },
+    {
+      "name": "attn-decode",
+      "oi_dram": 256.0,
+      "achieved_gflops": 2.2479858773332864,
+      "achieved_ci": [
+        2.0728207226935784,
+        2.4554886509977365
+      ],
+      "roof_gflops": 23.67322565628881,
+      "classic_gflops": 23.67322565628881,
+      "bound": "compute",
+      "l2_hit_rate": 0.9,
+      "grade_pct": 9.49590017841995,
+      "grade_ci": [
+        8.755970786528334,
+        10.37242953980559
+      ],
+      "verdict": "overhead-bound: likely launch/scheduling overhead, not BW"
+    }
+  ],
+  "assets": [
+    "assets/ladder.png"
+  ]
+}

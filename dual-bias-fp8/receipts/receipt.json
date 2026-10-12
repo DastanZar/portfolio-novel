@@ -1,0 +1,27 @@
+{
+  "M": 64,
+  "K": 256,
+  "methods": {
+    "fp32": {
+      "bytes": 65536,
+      "rel_err": 0.0
+    },
+    "fp16": {
+      "bytes": 32768,
+      "rel_err": 0.0007932165815679852
+    },
+    "int8_block": {
+      "bytes": 18432,
+      "rel_err": 0.015242578306284043
+    },
+    "fp8_uniform": {
+      "bytes": 16388,
+      "rel_err": 0.08870665510416281
+    },
+    "dual_bias_fp8": {
+      "bytes": 17408,
+      "rel_err": 0.04690238327793153
+    }
+  },
+  "artifact": "assets/dual_bias.png"
+}

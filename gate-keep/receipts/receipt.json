@@ -1,0 +1,40 @@
+{
+  "project": "gate-keep",
+  "n": 256,
+  "d": 32,
+  "mem_dim": 8,
+  "sink_keep": 2,
+  "hidden": 16,
+  "l2": 0.001,
+  "train_mse": 0.0020289430830705566,
+  "rows": [
+    {
+      "budget": 8,
+      "drop": 0.3176330179926239,
+      "memory": 0.2802122682252113,
+      "gain": 0.11781127164860357
+    },
+    {
+      "budget": 16,
+      "drop": 0.289049768620723,
+      "memory": 0.27082418939583935,
+      "gain": 0.06305342955916814
+    },
+    {
+      "budget": 32,
+      "drop": 0.17722006198716558,
+      "memory": 0.17119365903348677,
+      "gain": 0.03400519606003325
+    },
+    {
+      "budget": 64,
+      "drop": 0.14566409053783355,
+      "memory": 0.14274512442940032,
+      "gain": 0.020039023328505545
+    }
+  ],
+  "assets": [
+    "assets/gate_gain.png"
+  ],
+  "method": "ridge gate (closed-form) + orthonormal sketch memory"
+}

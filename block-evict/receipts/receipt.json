@@ -1,0 +1,51 @@
+{
+  "num_blocks": 16,
+  "block_size": 8,
+  "free_before": 7,
+  "free_after": 10,
+  "freed_phys_ids": [
+    0,
+    1,
+    3,
+    4
+  ],
+  "frag_before": 0.09722222222222221,
+  "frag_after": 0.14583333333333337,
+  "new_alloc_ok_after_evict": true,
+  "cow_pair_read_equal_prefix": true,
+  "seqs": {
+    "bg0": {
+      "len": 8,
+      "blocks": [
+        2
+      ]
+    },
+    "bg1": {
+      "len": 8,
+      "blocks": [
+        5
+      ]
+    },
+    "hot0": {
+      "len": 16,
+      "blocks": [
+        6,
+        7
+      ]
+    },
+    "hot0-chat": {
+      "len": 17,
+      "blocks": [
+        6,
+        7,
+        8
+      ]
+    },
+    "new": {
+      "len": 8,
+      "blocks": [
+        4
+      ]
+    }
+  }
+}

@@ -1,0 +1,18 @@
+[project]
+name = "bandit-spec"
+version = "0.1.0"
+description = "Thompson-sampling bandit over speculative-decoding draft lengths with SLO guard"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.24", "matplotlib>=3.5"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

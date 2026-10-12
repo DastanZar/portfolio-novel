@@ -1,0 +1,128 @@
+{
+  "project": "green-roof",
+  "timestamp_utc": "2026-10-12T08:16:27.525483+00:00",
+  "config": {
+    "model": "llama-3-8b",
+    "seq_len": 2048,
+    "batch": 8,
+    "qps": 10.0,
+    "slo_ms": 250.0
+  },
+  "rows": [
+    {
+      "gpu": "A10",
+      "tok_per_s": 26.248279792735506,
+      "ms_per_token": 304.78187763809524,
+      "bound": "memory",
+      "usd_per_1m": 7.937028063492064,
+      "joules_per_1m": 6571859.236571428,
+      "co2e_g_per_1m": 693.6962527492063,
+      "replicas": 49,
+      "feasible": false
+    },
+    {
+      "gpu": "A100-40",
+      "tok_per_s": 68.2455274611123,
+      "ms_per_token": 117.2237990915751,
+      "bound": "memory",
+      "usd_per_1m": 7.326487443223444,
+      "joules_per_1m": 6740368.447765568,
+      "co2e_g_per_1m": 711.4833361530322,
+      "replicas": 19,
+      "feasible": true
+    },
+    {
+      "gpu": "A100-80",
+      "tok_per_s": 89.24415129530071,
+      "ms_per_token": 89.64172871708683,
+      "bound": "memory",
+      "usd_per_1m": 6.847632054777468,
+      "joules_per_1m": 5154399.401232492,
+      "co2e_g_per_1m": 544.0754923523186,
+      "replicas": 15,
+      "feasible": true
+    },
+    {
+      "gpu": "H100",
+      "tok_per_s": 146.55289550943988,
+      "ms_per_token": 54.587798979957356,
+      "bound": "memory",
+      "usd_per_1m": 6.0653109977730395,
+      "joules_per_1m": 5492897.272358209,
+      "co2e_g_per_1m": 579.8058231933665,
+      "replicas": 9,
+      "feasible": true
+    },
+    {
+      "gpu": "H200",
+      "tok_per_s": 209.98623834188405,
+      "ms_per_token": 38.097734704761905,
+      "bound": "memory",
+      "usd_per_1m": 5.02678444021164,
+      "joules_per_1m": 3833584.5546666654,
+      "co2e_g_per_1m": 404.6561474370369,
+      "replicas": 7,
+      "feasible": true
+    },
+    {
+      "gpu": "L4",
+      "tok_per_s": 13.124139896367753,
+      "ms_per_token": 609.5637552761905,
+      "bound": "memory",
+      "usd_per_1m": 12.699244901587301,
+      "joules_per_1m": 6308984.86710857,
+      "co2e_g_per_1m": 665.948402639238,
+      "replicas": 98,
+      "feasible": false
+    },
+    {
+      "gpu": "MI300X",
+      "tok_per_s": 231.8598048358303,
+      "ms_per_token": 34.503608789218326,
+      "bound": "memory",
+      "usd_per_1m": 3.594125915543576,
+      "joules_per_1m": 3719920.3225876004,
+      "co2e_g_per_1m": 392.65825627313563,
+      "replicas": 6,
+      "feasible": true
+    },
+    {
+      "gpu": "RTX4090",
+      "tok_per_s": 44.18460431777143,
+      "ms_per_token": 181.0585411711457,
+      "bound": "memory",
+      "usd_per_1m": 5.029403921420714,
+      "joules_per_1m": 11712224.382008485,
+      "co2e_g_per_1m": 1236.290351434229,
+      "replicas": 29,
+      "feasible": false
+    },
+    {
+      "gpu": "RTX5090",
+      "tok_per_s": 78.30736804832759,
+      "ms_per_token": 102.16152323064645,
+      "bound": "memory",
+      "usd_per_1m": 3.9020026233927463,
+      "joules_per_1m": 8444288.40453312,
+      "co2e_g_per_1m": 891.3415538118294,
+      "replicas": 17,
+      "feasible": true
+    },
+    {
+      "gpu": "T4",
+      "tok_per_s": 13.124139896367753,
+      "ms_per_token": 609.5637552761905,
+      "bound": "memory",
+      "usd_per_1m": 7.407892859259259,
+      "joules_per_1m": 6133735.287466666,
+      "co2e_g_per_1m": 647.4498358992591,
+      "replicas": 98,
+      "feasible": false
+    }
+  ],
+  "cheapest_feasible": "MI300X",
+  "greenest_feasible": "MI300X",
+  "assets": [
+    "assets/green_tradeoff.png"
+  ]
+}

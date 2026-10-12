@@ -1,0 +1,157 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Novel LLM Efficiency Portfolio — 10 builds</title>
+<style>
+body{margin:0;background:#0b0f14;color:#e8ecef;font:16px/1.5 system-ui}header{padding:56px 20px;text-align:center;background:radial-gradient(800px 300px at 50% -50px,#26331a,#0b0f14)}
+h1{font-size:40px;margin:0}h1 span{color:#C4F03C}.sub{opacity:.8;max-width:760px;margin:12px auto}
+.grid{max-width:1080px;margin:0 auto;padding:20px}.card{background:#11161d;border:1px solid #222c36;border-radius:16px;overflow:hidden;margin:22px 0}
+.chead{padding:20px}.pill{background:#C4F03C;color:#111;font-weight:700;font-size:12px;padding:4px 10px;border-radius:99px}
+.headline{color:#C4F03C;font-weight:700}img{width:100%;display:block;background:#000}
+.cbody{padding:20px}code{background:#000;padding:2px 6px;border-radius:6px}.cite{opacity:.65;font-size:13px}
+.motion{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;padding:10px}.motion figure{background:#11161d;border:1px solid #222c36;border-radius:12px;padding:10px;width:300px;text-align:center}figcaption{font-size:13px;opacity:.75}
+footer{text-align:center;padding:30px;opacity:.6}a{color:#C4F03C}
+</style></head><body>
+<header><h1>LLM Efficiency <span>×10</span> — novel, tested, visual</h1>
+<p class=sub>10 fresh implementations (not forks): adaptive quantization, shelled VQ, dual-bias FP8, bandit speculative decoding, fair scheduling, block eviction, gated memory, fused epilogue, cache roofline, green planner. Each with passing tests, receipts, charts. All prior art credited.</p>
+<p><a href="#kurt-switch">quant</a> · <a href="#bandit-spec">decode</a> · <a href="#block-evict">memory</a> · <a href="#epi-norm">kernels</a> · <a href="#green-roof">planner</a></p></header>
+<div class=grid>
+<h2>Motion</h2>
+<div class=motion>
+<figure><img src="assets/bandit_race.gif"><figcaption>bandit-spec tracking oracle K</figcaption></figure>
+<figure><img src="assets/block_evict.gif"><figcaption>block-evict freeing blocks</figcaption></figure>
+<figure><img src="assets/gate_gain.gif"><figcaption>gate-keep memory beats drop</figcaption></figure>
+</div>
+<h2>Builds</h2>
+
+    <section class=cards id="kurt-switch">
+      <div class=card>
+        <div class=chead><span class=pill>Adaptive 4-bit Quantization</span><h2>kurt-switch</h2><p class=headline>79.9% lower MSE vs static codebook</p></div>
+        <a href="assets/kurt-switch.png"><img loading=lazy src="assets/kurt-switch.png" alt="kurt-switch result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>Per-row kurtosis + sparsity switch among 3 codebooks (uniform / odd companded / shifted) with closed-form LS scale.</p>
+          <h3>Implementation</h3><p><code>kurt_switch/core.py: compute_row_stats, select_codebook, quantize_row. 5 tests.</code></p>
+          <h3>Applications</h3><p>On-device LLM weights, Q4 serving where outlier rows kill quality.</p>
+          <p class=cite>Prior art: GPTQ/AWQ + Grouped Lattice VQ 2510.20984 + r/LocalLLaMA 4-bit bench</p>
+          <p><a href="https://github.com/DastanZar/kurt-switch">code</a> · <a href="assets/kurt-switch.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="shell-vq">
+      <div class=card>
+        <div class=chead><span class=pill>Shelled Vector Quantization</span><h2>shell-vq</h2><p class=headline>64.5% error cut vs flat VQ</p></div>
+        <a href="assets/shell-vq.png"><img loading=lazy src="assets/shell-vq.png" alt="shell-vq result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>Quantile radius shells (inner/mid/outer) + per-shell scales + gated 1-bit outer residual.</p>
+          <h3>Implementation</h3><p><code>shell_vq/core.py: build_shell_codebook, quantize_shelled, residual_refine. 6 tests.</code></p>
+          <h3>Applications</h3><p>Sub-2-bit LLM compression, vector DB weight store.</p>
+          <p class=cite>Prior art: AQLM/QTIP + Leech VQ 2603.11021 + BTC-LLM</p>
+          <p><a href="https://github.com/DastanZar/shell-vq">code</a> · <a href="assets/shell-vq.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="dual-bias-fp8">
+      <div class=card>
+        <div class=chead><span class=pill>Per-block FP8</span><h2>dual-bias-fp8</h2><p class=headline>2x accuracy at same bandwidth</p></div>
+        <a href="assets/dual-bias-fp8.png"><img loading=lazy src="assets/dual-bias-fp8.png" alt="dual-bias-fp8 result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>K-blocks of 32 choose E5M2 vs E4M3 by range + calibrate bias 11-19, fused dequant+GEMV.</p>
+          <h3>Implementation</h3><p><code>dual_bias_fp8/core.py: choose_format, calibrate_bias, gemv_reference. 5 pass.</code></p>
+          <h3>Applications</h3><p>GPUs without FP8 units, weight-only serving.</p>
+          <p class=cite>Prior art: FP8 spec + TensorRT/TorchAO + KV-dequant thread</p>
+          <p><a href="https://github.com/DastanZar/dual-bias-fp8">code</a> · <a href="assets/dual-bias-fp8.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="bandit-spec">
+      <div class=card>
+        <div class=chead><span class=pill>Bandit Speculative Decoding</span><h2>bandit-spec</h2><p class=headline>Bandit tracks oracle K=3, regret 13.7</p></div>
+        <a href="assets/bandit-spec.png"><img loading=lazy src="assets/bandit-spec.png" alt="bandit-spec result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>Thompson sampling over K=1..7 with cost-normalized reward + p99 SLO veto shrink.</p>
+          <h3>Implementation</h3><p><code>bandit_spec/core.py: thompson_pick, slo_guard, BanditSpeculator. 6 tests.</code></p>
+          <h3>Applications</h3><p>Chat serving with latency SLOs, MTP draft headroom.</p>
+          <p class=cite>Prior art: Leviathan/Chen + SpecDec++ 2405.19715 + AdaSpec + Not-a-Bandit</p>
+          <p><a href="https://github.com/DastanZar/bandit-spec">code</a> · <a href="assets/bandit-spec.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="fair-batch">
+      <div class=card>
+        <div class=chead><span class=pill>Fair + Power Scheduler</span><h2>fair-batch</h2><p class=headline>Jain 0.950, p99 -13%</p></div>
+        <a href="assets/fair-batch.png"><img loading=lazy src="assets/fair-batch.png" alt="fair-batch result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>Deficit-round-robin across users + DVFS power cap + KV-pressure admission.</p>
+          <h3>Implementation</h3><p><code>fair_batch/sim.py: jain_index, power_model, simulate_fair_continuous. 6 tests.</code></p>
+          <h3>Applications</h3><p>Multi-tenant inference, power-capped clusters.</p>
+          <p class=cite>Prior art: Orca + NanoFlow + Fair Batch 2510.14392 + KernelSight-LM</p>
+          <p><a href="https://github.com/DastanZar/fair-batch">code</a> · <a href="assets/fair-batch.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="block-evict">
+      <div class=card>
+        <div class=chead><span class=pill>Block-Aligned Eviction</span><h2>block-evict</h2><p class=headline>Frees whole blocks, COW intact</p></div>
+        <a href="assets/block-evict.png"><img loading=lazy src="assets/block-evict.png" alt="block-evict result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>Score whole blocks (mean future-attn minus frag cost), evict full prefix blocks.</p>
+          <h3>Implementation</h3><p><code>block_evict/cache.py: BlockCache + block_evict. 6 tests.</code></p>
+          <h3>Applications</h3><p>vLLM PagedAttention long-context serving.</p>
+          <p class=cite>Prior art: Kwon PagedAttention + H2O/StreamingLLM + PagedEviction 2509.04377</p>
+          <p><a href="https://github.com/DastanZar/block-evict">code</a> · <a href="assets/block-evict.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="gate-keep">
+      <div class=card>
+        <div class=chead><span class=pill>Gated KV + Latent Memory</span><h2>gate-keep</h2><p class=headline>+11.8% at budget-8 vs drop</p></div>
+        <a href="assets/gate-keep.png"><img loading=lazy src="assets/gate-keep.png" alt="gate-keep result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>Ridge-gate predicts future importance; evicted tail compressed to 8-d latent key.</p>
+          <h3>Implementation</h3><p><code>gate_keep/compress.py: fit_gate_ridge, compress_with_memory. 5 tests.</code></p>
+          <h3>Applications</h3><p>32k+ context chat, reasoning traces.</p>
+          <p class=cite>Prior art: StreamingLLM/H2O + Gated Eviction 2601.17668</p>
+          <p><a href="https://github.com/DastanZar/gate-keep">code</a> · <a href="assets/gate-keep.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="epi-norm">
+      <div class=card>
+        <div class=chead><span class=pill>Fused Norm+Gate Epilogue</span><h2>epi-norm</h2><p class=headline>52.8% HBM saved (74→35 MB)</p></div>
+        <a href="assets/epi-norm.png"><img loading=lazy src="assets/epi-norm.png" alt="epi-norm result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>RMSNorm+residual+SwiGLU fused; recompute rrms in backward to save store.</p>
+          <h3>Implementation</h3><p><code>epi_norm/core.py: fused_epilogue_ref, hbm_accountant. 5 tests.</code></p>
+          <h3>Applications</h3><p>LLM training throughput, Liger-style kernels.</p>
+          <p class=cite>Prior art: Zhang&Sennrich + Liger + GEMM-epilogue 2605.19269</p>
+          <p><a href="https://github.com/DastanZar/epi-norm">code</a> · <a href="assets/epi-norm.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="cache-roof">
+      <div class=card>
+        <div class=chead><span class=pill>Cache-Aware Roofline</span><h2>cache-roof</h2><p class=headline>Grades 81.5% / 65.5% with CIs</p></div>
+        <a href="assets/cache-roof.png"><img loading=lazy src="assets/cache-roof.png" alt="cache-roof result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>L2-hit split + dequant-overlap + 95% CIs from trials, % of cache-adjusted peak.</p>
+          <h3>Implementation</h3><p><code>cache_roof/harness.py + roofline.py: time_fn, cache_adjusted_roof. 5 tests.</code></p>
+          <h3>Applications</h3><p>Kernel selection, 5090 + vLLM bench rigs.</p>
+          <p class=cite>Prior art: Williams Roofline + do_bench + KernelBench</p>
+          <p><a href="https://github.com/DastanZar/cache-roof">code</a> · <a href="assets/cache-roof.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+    <section class=cards id="green-roof">
+      <div class=card>
+        <div class=chead><span class=pill>Cost/Carbon Planner</span><h2>green-roof</h2><p class=headline>MI300X $3.59/1M, 393g CO2</p></div>
+        <a href="assets/green-roof.png"><img loading=lazy src="assets/green-roof.png" alt="green-roof result chart"></a>
+        <div class=cbody>
+          <h3>How it works</h3><p>Roofline + $/J/CO2 + replicas_for_slo autosolver + fair_split tenants.</p>
+          <h3>Implementation</h3><p><code>green_roof/planner.py + cli.py: plan|gpus|models|green. 8 tests.</code></p>
+          <h3>Applications</h3><p>Capacity planning, green AI quotes, SLO sizing.</p>
+          <p class=cite>Prior art: Williams + LLM Inference Unveiled + KernelSight-LM</p>
+          <p><a href="https://github.com/DastanZar/green-roof">code</a> · <a href="assets/green-roof.png">full PNG</a></p>
+        </div>
+      </div>
+    </section>
+<h2>Reproduce</h2>
+<p><code>python -m pytest tests -q</code> + <code>python demos/demo.py</code> in each folder. Receipts in <code>receipts/receipt.json</code>. Deploy: push <code>portfolio-novel/docs</code> as GitHub Pages (Settings → Pages → Deploy from branch → /docs).</p>
+</div><footer>MIT · Abhinav Chauhan 2026 · Novel deltas with attribution — archive originals, publish these.</footer></body></html>

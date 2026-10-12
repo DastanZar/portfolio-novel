@@ -1,0 +1,49 @@
+{
+  "project": "epi-norm",
+  "config": {
+    "B": 2,
+    "T": 512,
+    "D": 1024,
+    "H": 2752,
+    "dtype_bytes": 2,
+    "N": 1024
+  },
+  "designs": {
+    "baseline": {
+      "fwd_bytes": 25952256,
+      "stored_bytes": 15466496,
+      "bwd_bytes": 33030144,
+      "total_bytes": 74448896,
+      "passes": 3,
+      "flops_recompute": 0
+    },
+    "fused-store": {
+      "fwd_bytes": 15466496,
+      "stored_bytes": 13369344,
+      "bwd_bytes": 28835840,
+      "total_bytes": 57671680,
+      "passes": 1,
+      "flops_recompute": 0
+    },
+    "fused-recompute": {
+      "fwd_bytes": 15466496,
+      "stored_bytes": 2099200,
+      "bwd_bytes": 17565696,
+      "total_bytes": 35131392,
+      "passes": 1,
+      "flops_recompute": 2886729728
+    }
+  },
+  "saving_vs_baseline": 0.5281139964788732,
+  "kernel_status": {
+    "has_triton": false,
+    "has_torch": false,
+    "reason": "torch not available; triton not available",
+    "has_kernel": false
+  },
+  "kernel_backend_demo": "numpy-ref",
+  "assets": [
+    "assets/traffic_sankey.png"
+  ],
+  "method": "RMSNorm+residual+SwiGLU epilogue fusion; recompute rrms in backward"
+}

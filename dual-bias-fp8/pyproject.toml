@@ -1,0 +1,19 @@
+[project]
+name = "dual-bias-fp8"
+version = "0.1.0"
+description = "Per-block dual format + dual exponent-bias FP8 GEMV (numpy reference)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.24", "matplotlib>=3.5"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+torch = ["torch>=2.1"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
