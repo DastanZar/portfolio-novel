@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kurt-switch — adaptive 4-bit quant demo</title>
+<style>
+:root{--bg:#0b0f14;--panel:#11161d;--line:#222c36;--txt:#e8ecef;--acc:#C4F03C;--mut:#9aa4ad}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 system-ui,sans-serif}
+header{padding:28px 20px 10px;max-width:960px;margin:0 auto}
+header a{color:var(--acc);text-decoration:none;font-weight:600}
+h1{margin:8px 0 4px;font-size:30px}h1 span{color:var(--acc)}
+.sub{color:var(--mut);max-width:760px;margin:0}
+main{max-width:960px;margin:0 auto;padding:10px 20px 40px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:14px 0}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+label{font-size:13px;color:var(--mut)}label b{color:var(--txt)}
+button{background:var(--acc);color:#111;border:0;border-radius:10px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:14px}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+input[type=range]{width:180px;accent-color:var(--acc)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.stat{background:#0d1218;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.stat .k{font-size:12px;color:var(--mut)}.stat .v{font-size:20px;font-weight:800;color:var(--acc)}
+canvas{width:100%;max-width:900px;height:auto;background:#0d1218;border:1px solid var(--line);border-radius:10px}
+.counts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.pill{border:1px solid var(--acc);border-radius:99px;padding:3px 12px;font-size:13px}
+.pill b{color:var(--acc)}
+code{background:#000;padding:2px 6px;border-radius:6px;font-size:13px}
+.how{color:var(--mut);font-size:14px}.how b{color:var(--txt)}
+footer{opacity:.6;font-size:13px;padding:10px 0}a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+<a href="../../index.html">&larr; all builds</a>
+<h1>kurt-switch <span>live demo</span></h1>
+<p class="sub">Native JS re-implementation of kurtosis-switched 4-bit quantization. 200 rows &times; 64 dims synthetic (gaussian + outliers). Each row picks a codebook by its kurtosis, then gets a closed-form least-squares scale.</p>
+</header>
+<main>
+<div class="card">
+<div class="row">
+<button id="seedBtn">Reseed (seed <span id="seedVal">7</span>)</button>
+<label>Kurtosis target <b id="ktVal">5.0</b><br><input id="kt" type="range" min="0" max="12" step="0.5" value="5"></label>
+<label>Outlier prob <b id="opVal">0.04</b><br><input id="op" type="range" min="0" max="0.12" step="0.01" value="0.04"></label>
+<button id="runBtn" class="ghost">Re-run quantize</button>
+</div>
+<div class="stats">
+<div class="stat"><div class="k">Adaptive MSE</div><div class="v" id="mA">–</div></div>
+<div class="stat"><div class="k">Uniform-16 MSE (baseline)</div><div class="v" id="mU">–</div></div>
+<div class="stat"><div class="k">MSE reduction</div><div class="v" id="mR">–</div></div>
+<div class="stat"><div class="k">Win rate (rows adaptive wins)</div><div class="v" id="mW">–</div></div>
+</div>
+<div class="counts" id="counts"></div>
+</div>
+<div class="card">
+<h3 style="margin:0 0 8px">MSE per kurtosis bin <span style="color:var(--mut);font-weight:400;font-size:13px">(green = adaptive, grey = uniform)</span></h3>
+<canvas id="chart" width="880" height="300"></canvas>
+<div class="how" id="binNote"></div>
+</div>
+<div class="card how">
+<h3 style="color:var(--txt);margin:0 0 6px">How it works</h3>
+<p><b>1. Stats:</b> per row compute excess kurtosis <code>mean(z^4)-3</code>, skew, outlier fraction (|z|&gt;3). <b>2. Switch rule:</b> kurtosis &gt; target (slider) or outlier-frac &gt; 0.02 &rarr; <code>odd16</code> companded grid (fine near zero); |skew| &gt; 1 &rarr; <code>shifted</code> grid; else <code>uniform16</code>. <b>3. Scale:</b> closed-form LS <code>s = (x&middot;c)/(c&middot;c)</code> with assign&rarr;rescale&rarr;reassign&rarr;rescale. Mirrors <code>kurt_switch/core.py: compute_row_stats, select_codebook, quantize_row</code>.</p>
+<p>Code folder: <a href="https://github.com/DastanZar/kurt-switch">github.com/DastanZar/kurt-switch</a> &middot; <a href="../../index.html#kurt-switch">portfolio card</a></p>
+</div>
+</main>
+<script>
+"use strict";
+// ---- RNG (mulberry32) + gaussian ----
+let seed = 7;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let R = mulberry32(seed);
+function randn(){let u=0,v=0;while(u===0)u=R();while(v===0)v=R();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+// ---- codebooks (mirror core.py) ----
+function lin(a,b,n){const o=[];for(let i=0;i<n;i++)o.push(a+(b-a)*i/(n-1));return o;}
+function getCodebook(name){
+  if(name==="uniform16")return lin(-1,1,16);
+  if(name==="odd16")return lin(-1,1,16).map(u=>Math.sign(u)*Math.abs(u)*Math.abs(u));
+  if(name==="shifted")return lin(-0.75,1.25,16);
+  throw new Error("bad codebook "+name);
+}
+// ---- stats ----
+function rowStats(x){
+  const n=x.length;let m=0;for(const v of x)m+=v;m/=n;
+  let va=0;for(const v of x)va+=(v-m)*(v-m);va/=n;
+  const sd=Math.sqrt(va);
+  if(sd<1e-12)return{k:0,sk:0,of:0,zf:1};
+  let k4=0,sk3=0,of=0,zf=0;
+  for(const v of x){const z=(v-m)/sd;k4+=z*z*z*z;sk3+=z*z*z;if(Math.abs(z)>3)of++;if(Math.abs(v)<1e-6)zf++;}
+  return{k:k4/n-3,sk:sk3/n,of:of/n,zf:zf/n};
+}
+function selectCodebook(s,kt){
+  if(s.zf>0.30||s.k>kt||s.of>0.02)return"odd16";
+  if(Math.abs(s.sk)>1.0)return"shifted";
+  return"uniform16";
+}
+function lsScale(x,c){let d=0,n=0;for(let i=0;i<c.length;i++){d+=x[i]*c[i];n+=c[i]*c[i];}return n<1e-18?0:d/n;}
+function quantizeRow(x,forceName,skew){
+  let name=forceName,base=getCodebook(forceName);
+  if(forceName==="shifted"&&skew<0)base=base.slice().reverse().map(v=>-v); // mirror for left skew
+  const mx=Math.max(...x.map(Math.abs));
+  if(mx<1e-12)return{mse:0};
+  const cbMax=Math.max(...base.map(Math.abs));
+  let s0=mx/(cbMax||1);
+  let idx=assign(x,base,s0);
+  let s1=lsScale(x,idx.map(i=>base[i]))||s0;
+  let idx2=assign(x,base,s1);
+  let s2=lsScale(x,idx2.map(i=>base[i]))||s1;
+  let e=0;for(let i=0;i<x.length;i++){const d=x[i]-s2*base[idx2[i]];e+=d*d;}
+  return{mse:e/x.length};
+  function assign(x,b,s){return x.map(v=>{let bi=0,bd=1e300;for(let j=0;j<b.length;j++){const d=Math.abs(v-s*b[j]);if(d<bd){bd=d;bi=j;}}return bi;});}
+}
+// ---- data + run ----
+const ROWS=200,DIM=64;
+const BINS=[[-99,0],[0,2],[2,4],[4,6],[6,10],[10,999]],BLABEL=["<0","0–2","2–4","4–6","6–10","10+"];
+function genData(op){
+  const rows=[];
+  for(let r=0;r<ROWS;r++){
+    const kind=R(),row=new Array(DIM);
+    for(let d=0;d<DIM;d++){
+      let v=randn();
+      if(kind<0.15)v+=1.5*Math.abs(randn());           // skewed rows
+      if(R()<op)v*=(5+3*R())*(R()<0.5?-1:1);           // heavy outliers
+      if(kind>0.9&&R()<0.4)v=0;                        // sparse rows
+      row[d]=v;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function run(){
+  const kt=parseFloat(document.getElementById("kt").value);
+  const op=parseFloat(document.getElementById("op").value);
+  document.getElementById("ktVal").textContent=kt.toFixed(1);
+  document.getElementById("opVal").textContent=op.toFixed(2);
+  R=mulberry32(seed);
+  const rows=genData(op);
+  const U=getCodebook("uniform16");
+  let mA=0,mU=0,wins=0,counts={uniform16:0,odd16:0,shifted:0};
+  const ba=Array(BINS.length).fill(0),bu=Array(BINS.length).fill(0),bn=Array(BINS.length).fill(0);
+  for(const x of rows){
+    const s=rowStats(x);
+    const pick=selectCodebook(s,kt);
+    counts[pick]++;
+    const ra=quantizeRow(x,pick,s.sk),ru=quantizeRow(x,"uniform16",0);
+    mA+=ra.mse;mU+=ru.mse;
+    if(ra.mse<ru.mse-1e-12)wins++;
+    let b=BINS.findIndex(e=>s.k>=e[0]&&s.k<e[1]);if(b<0)b=BINS.length-1;
+    ba[b]+=ra.mse;bu[b]+=ru.mse;bn[b]++;
+  }
+  mA/=ROWS;mU/=ROWS;
+  document.getElementById("mA").textContent=mA.toExponential(3);
+  document.getElementById("mU").textContent=mU.toExponential(3);
+  document.getElementById("mR").textContent=(100*(1-mA/mU)).toFixed(1)+"%";
+  document.getElementById("mW").textContent=(100*wins/ROWS).toFixed(1)+"%";
+  document.getElementById("counts").innerHTML=
+    Object.entries(counts).map(([k,v])=>`<span class="pill"><b>${k}</b> ${v} rows</span>`).join("")+
+    `<span class="pill">rows ${ROWS} × dim ${DIM}</span>`;
+  draw(ba.map((v,i)=>bn[i]?v/bn[i]:0),bu.map((v,i)=>bn[i]?v/bn[i]:0),bn);
+}
+function draw(ba,bu,bn){
+  const c=document.getElementById("chart"),g=c.getContext("2d");
+  const W=c.width,H=c.height;g.clearRect(0,0,W,H);
+  g.fillStyle="#0d1218";g.fillRect(0,0,W,H);
+  const mx=Math.max(...bu,...ba,1e-9)*1.1,padL=64,padB=34,padT=14,cw=(W-padL-16)/ba.length;
+  g.strokeStyle="#222c36";g.fillStyle="#9aa4ad";g.font="11px system-ui";g.textAlign="right";
+  for(let i=0;i<=4;i++){const y=padT+(H-padB-padT)*i/4,v=mx*(1-i/4);
+    g.beginPath();g.moveTo(padL,y);g.lineTo(W-8,y);g.stroke();
+    g.fillText(v.toExponential(1),padL-6,y+4);}
+  for(let i=0;i<ba.length;i++){
+    const bw=cw*0.32,x0=padL+i*cw+cw*0.1;
+    const ha=(H-padB-padT)*(ba[i]/mx),hu=(H-padB-padT)*(bu[i]/mx);
+    g.fillStyle="#5a6672";g.fillRect(x0,H-padB-hu,bw,hu);                    // uniform
+    g.fillStyle="#C4F03C";g.fillRect(x0+bw+3,H-padB-ha,bw,ha);               // adaptive
+    g.fillStyle="#9aa4ad";g.textAlign="center";g.fillText(BLABEL[i],x0+bw,H-padB+16);
+    g.fillText("n="+bn[i],x0+bw,H-padB+28);
+  }
+  document.getElementById("binNote").textContent=
+    "Bins group rows by excess kurtosis. High-kurtosis bins should show the biggest green-vs-grey gap (odd16 companding wins on heavy tails).";
+}
+document.getElementById("seedBtn").onclick=()=>{seed=(seed*9301+49297)%233280;document.getElementById("seedVal").textContent=seed;run();};
+document.getElementById("runBtn").onclick=run;
+document.getElementById("kt").oninput=run;
+document.getElementById("op").oninput=run;
+run();
+</script>
+</body>
+</html>

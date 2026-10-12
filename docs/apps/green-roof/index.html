@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>green-roof — cost / carbon / SLO calculator</title>
+<style>
+:root{--bg:#0b0f14;--card:#11161d;--line:#222c36;--txt:#e8ecef;--acc:#C4F03C;--mut:#9aa7b2}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 system-ui,sans-serif}
+header{padding:28px 20px;text-align:center;background:radial-gradient(800px 280px at 50% -60px,#1a3327,#0b0f14)}
+h1{margin:0;font-size:28px}h1 span{color:var(--acc)}.sub{opacity:.8;max-width:840px;margin:10px auto;font-size:14px}
+.wrap{max-width:1020px;margin:0 auto;padding:20px}.back{color:var(--acc);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0}
+.card h2{margin:0 0 10px;font-size:17px;color:var(--acc)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}@media(max-width:760px){.grid3{grid-template-columns:1fr 1fr}}
+label{font-size:13px;color:var(--mut);display:block;margin:8px 0 2px}
+select,input[type=number]{background:#000;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;font-size:14px}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.val{color:var(--txt);font-weight:700}
+.stat{background:#000;border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}
+.stat .k{font-size:12px;color:var(--mut)}.stat .v{font-size:21px;font-weight:800;margin-top:2px}
+.badge{display:inline-block;padding:4px 14px;border-radius:99px;font-weight:800;font-size:14px}
+.ok{background:#1e3a2a;color:#5fe3a1}.miss{background:#3a1d1d;color:#ff9d9d}
+canvas{width:100%;height:360px;background:#000;border:1px solid var(--line);border-radius:12px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+th{color:var(--mut);text-align:left;padding:6px;border-bottom:1px solid var(--line)}
+td{padding:6px;border-bottom:1px solid #1a222b}
+tr.sel td{background:#1b2410}
+code{background:#000;padding:2px 6px;border-radius:6px;font-size:12.5px}
+.note{font-size:12.5px;color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+<h1>green-roof <span>cost · carbon · SLO</span></h1>
+<p class="sub">Roofline decode model: <code>t_step = max(FLOP/(TFLOPS·0.6), Bytes/(BW·0.7))</code>, tok/s = batch/t_step, $/J/CO₂ per 1M, replicas for SLO (p99 ≈ 2× mean). Live recompute.</p>
+<p><a class="back" href="../../index.html">← back to portfolio</a></p>
+</header>
+<div class="wrap">
+
+<div class="card"><h2>Config</h2>
+<div class="grid2">
+<div>
+<label>Model</label>
+<select id="model">
+<option value="llama-3-8b">llama-3-8b (8.0B)</option>
+<option value="llama-3-70b">llama-3-70b (70.6B)</option>
+<option value="qwen-32b">qwen-32b (32.5B)</option>
+<option value="mistral-7b">mistral-7b (7.3B)</option>
+<option value="deepseek-16b">deepseek-16b (16.0B, est.)</option>
+</select>
+<label>GPU (built-in $/hr · BW · W)</label>
+<select id="gpu">
+<option value="A100">A100-80 — $2.20/hr · 2.04 TB/s · 400W</option>
+<option value="H100">H100 — $3.20/hr · 3.35 TB/s · 700W</option>
+<option value="MI300X">MI300X — $3.00/hr · 5.30 TB/s · 750W</option>
+<option value="4090">RTX 4090 — $0.80/hr · 1.01 TB/s · 450W</option>
+<option value="T4">T4 — $0.35/hr · 0.30 TB/s · 70W</option>
+</select>
+</div>
+<div>
+<label>Batch <span class="val" id="batchv">8</span> (1–64)</label>
+<input id="batch" type="range" min="1" max="64" value="8" step="1">
+<label>Seq len <span class="val" id="seqv">2048</span> (256–8192)</label>
+<input id="seq" type="range" min="256" max="8192" value="2048" step="256">
+<label>SLO p99 budget <span class="val" id="slov">250 ms</span> (50–1000)</label>
+<input id="slo" type="range" min="50" max="1000" value="250" step="10">
+<label>QPS target <span class="val" id="qpsv">10</span> (1–100)</label>
+<input id="qps" type="range" min="1" max="100" value="10" step="1">
+</div>
+</div>
+</div>
+
+<div class="card"><h2>Outputs — selected GPU</h2>
+<div class="grid3" style="grid-template-columns:repeat(3,1fr)">
+<div class="stat"><div class="k">Throughput</div><div class="v" id="oT">–</div></div>
+<div class="stat"><div class="k">$/1M tokens</div><div class="v" id="oC">–</div></div>
+<div class="stat"><div class="k">Energy / 1M</div><div class="v" id="oJ">–</div></div>
+<div class="stat"><div class="k">gCO₂e / 1M</div><div class="v" id="oG">–</div></div>
+<div class="stat"><div class="k">Replicas for SLO</div><div class="v" id="oR">–</div></div>
+<div class="stat"><div class="k">Feasible</div><div class="v"><span class="badge ok" id="oF">–</span></div></div>
+</div>
+<p class="note" id="detail"></p>
+</div>
+
+<div class="card"><h2>Tradeoff — $ vs CO₂ across GPUs (log–log)</h2>
+<canvas id="cv" width="900" height="360"></canvas>
+<table id="gtab"><thead><tr><th>GPU</th><th>tok/s</th><th>$/1M</th><th>gCO₂/1M</th><th>p99 est</th><th>replicas</th><th>SLO</th></tr></thead><tbody></tbody></table>
+<p class="note">Green = SLO-feasible, red × = miss. Star ★ = selected. Hover title shows $/hr · BW · W.</p>
+</div>
+
+<div class="card note">
+Specs from <code>green_roof/gpu.py + model.py + planner.py</code> (bf16 weights, util 0.6/0.7, PUE 1.15, grid 380 g/kWh, 128 tok/req, p99≈2×mean). deepseek-16b (16B, KV 640 B/tok) is a back-of-envelope estimate, same method as MODEL_ZOO.
+</div>
+</div>
+
+<script>
+"use strict";
+const MODELS = {
+ "llama-3-8b":{p:8.0, kv:512}, "llama-3-70b":{p:70.6, kv:1280},
+ "qwen-32b":{p:32.5, kv:640}, "mistral-7b":{p:7.3, kv:320},
+ "deepseek-16b":{p:16.0, kv:640},
+};
+const GPUS = {
+ A100:{bw:2.04, tf:312, w:400, price:2.20, mem:80},
+ H100:{bw:3.35, tf:989, w:700, price:3.20, mem:80},
+ MI300X:{bw:5.30, tf:1307, w:750, price:3.00, mem:192},
+ "4090":{bw:1.01, tf:330, w:450, price:0.80, mem:24},
+ T4:{bw:0.30, tf:65, w:70, price:0.35, mem:16},
+};
+const PUE=1.15, CO2=380, UC=0.6, UB=0.7, TPR=128;
+const $=id=>document.getElementById(id);
+const cv=$("cv"), ctx=cv.getContext("2d");
+
+function plan(m,g,batch,seq){
+  const M=MODELS[m], G=GPUS[g];
+  const flops=2*M.p*1e9*batch;
+  const wbytes=M.p*1e9*2; // bf16
+  const rb=(wbytes+M.kv*seq)*batch;
+  const tc=flops/(G.tf*1e12*UC), tm=rb/(G.bw*1e12*UB);
+  const ts=Math.max(tc,tm), tps=batch/ts;
+  const usd=G.price/(tps*3600)*1e6;
+  const J=G.w*PUE/tps*1e6, co2=J/3.6e6*CO2;
+  return {tps,usd,J,co2,ms:ts*1e3,tcm:tc*1e3,tmm:tm*1e3,bound:tc>=tm?"compute":"memory"};
+}
+function slo(m,g,batch,seq,qps,budget){
+  const p=plan(m,g,batch,seq), p99=2*p.ms;
+  const ok=p99<=budget, perQ=p.tps/TPR;
+  const rep=Math.max(1,Math.ceil(qps/perQ));
+  return {...p,p99,ok,rep,reason:ok?"ok":`p99 ${p99.toFixed(0)}ms > ${budget}ms on ${g}`};
+}
+function fmt(n,d=1){return n>=1000?n.toFixed(0):n>=100?n.toFixed(1):n.toFixed(d);}
+function recompute(){
+  const m=$("model").value,g=$("gpu").value;
+  const b=+$("batch").value,s=+$("seq").value,budget=+$("slo").value,qps=+$("qps").value;
+  $("batchv").textContent=b;$("seqv").textContent=s;$("slov").textContent=budget+" ms";$("qpsv").textContent=qps;
+  const r=slo(m,g,b,s,qps,budget);
+  $("oT").textContent=fmt(r.tps)+" tok/s";
+  $("oC").textContent="$"+r.usd.toFixed(2);
+  $("oJ").textContent=(r.J/1e6).toFixed(2)+" MJ";
+  $("oG").textContent=r.co2.toFixed(0)+" g";
+  $("oR").textContent="×"+r.rep;
+  const f=$("oF");f.textContent=r.ok?"FEASIBLE":"MISS";f.className="badge "+(r.ok?"ok":"miss");
+  $("detail").textContent=`${m} on ${g} · batch ${b} seq ${s} · ${r.ms.toFixed(2)} ms/tok (${r.bound}: comp ${r.tcm.toFixed(2)} / mem ${r.tmm.toFixed(2)}) · p99-est ${r.p99.toFixed(0)}ms vs ${budget}ms · ${r.rep} replica(s) @ $${(GPUS[g].price*r.rep).toFixed(2)}/hr · ${r.reason}`;
+  const rows=Object.keys(GPUS).map(k=>({g:k,...slo(m,k,b,s,qps,budget)}));
+  const tb=document.querySelector("#gtab tbody");tb.innerHTML="";
+  rows.forEach(rw=>{
+    const tr=document.createElement("tr");if(rw.g===g)tr.className="sel";
+    tr.title=`$${GPUS[rw.g].price}/hr · ${GPUS[rw.g].bw} TB/s · ${GPUS[rw.g].w}W`;
+    tr.innerHTML=`<td><b>${rw.g}</b>${rw.g===g?" ★":""}</td><td>${fmt(rw.tps)}</td><td>$${rw.usd.toFixed(2)}</td><td>${rw.co2.toFixed(0)}</td><td>${rw.p99.toFixed(0)}ms</td><td>×${rw.rep}</td><td>${rw.ok?"✅":"❌"}</td>`;
+    tb.appendChild(tr);
+  });
+  draw(rows,g);
+}
+function draw(rows,sel){
+  const W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);
+  const pad={l:70,r:24,t:24,b:52};
+  const xs=rows.map(r=>r.usd),ys=rows.map(r=>r.co2);
+  const lx0=Math.log10(Math.min(...xs)*0.8),lx1=Math.log10(Math.max(...xs)*1.25);
+  const ly0=Math.log10(Math.min(...ys)*0.8),ly1=Math.log10(Math.max(...ys)*1.25);
+  const X=v=>pad.l+(W-pad.l-pad.r)*(Math.log10(v)-lx0)/(lx1-lx0);
+  const Y=v=>H-pad.b-(H-pad.t-pad.b)*(Math.log10(v)-ly0)/(ly1-ly0);
+  ctx.strokeStyle="#222c36";ctx.fillStyle="#9aa7b2";ctx.font="11px system-ui";
+  for(let e=Math.floor(lx0);e<=Math.ceil(lx1);e++){const v=Math.pow(10,e);if(v<Math.min(...xs)*0.79||v>Math.max(...xs)*1.26)continue;
+    ctx.beginPath();ctx.moveTo(X(v),pad.t);ctx.lineTo(X(v),H-pad.b);ctx.stroke();ctx.fillText("$"+v,X(v)-8,H-34);}
+  for(let e=Math.floor(ly0);e<=Math.ceil(ly1);e++){const v=Math.pow(10,e);if(v<Math.min(...ys)*0.79||v>Math.max(...ys)*1.26)continue;
+    ctx.beginPath();ctx.moveTo(pad.l,Y(v));ctx.lineTo(W-pad.r,Y(v));ctx.stroke();ctx.fillText(v+"g",14,Y(v)+4);}
+  ctx.fillStyle="#9aa7b2";ctx.fillText("$/1M tokens (log)",W/2-50,H-12);ctx.fillText("gCO₂e/1M",4,14);
+  rows.forEach(r=>{
+    const x=X(r.usd),y=Y(r.co2);
+    ctx.fillStyle=r.ok?"#5fe3a1":"#ff7b7b";
+    if(r.ok){ctx.beginPath();ctx.arc(x,y,r.g===sel?9:7,0,7);ctx.fill();
+      ctx.fillStyle="#0b0f14";ctx.font="bold 9px system-ui";ctx.fillText("●",x-3,y+3);ctx.font="11px system-ui";}
+    else{ctx.strokeStyle="#ff7b7b";ctx.lineWidth=3;ctx.beginPath();
+      ctx.moveTo(x-7,y-7);ctx.lineTo(x+7,y+7);ctx.moveTo(x+7,y-7);ctx.lineTo(x-7,y+7);ctx.stroke();ctx.lineWidth=1;}
+    if(r.g===sel){ctx.strokeStyle="#C4F03C";ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,13,0,7);ctx.stroke();ctx.lineWidth=1;}
+    ctx.fillStyle="#e8ecef";ctx.fillText(r.g+" ×"+r.rep,x+10,y-8);
+  });
+  ctx.fillStyle="#5fe3a1";ctx.fillText("● feasible",pad.l+8,pad.t+4);
+  ctx.fillStyle="#ff7b7b";ctx.fillText("× SLO-miss",pad.l+90,pad.t+4);
+}
+["model","gpu","batch","seq","slo","qps"].forEach(id=>$(id).addEventListener("input",recompute));
+recompute();
+</script>
+</body>
+</html>

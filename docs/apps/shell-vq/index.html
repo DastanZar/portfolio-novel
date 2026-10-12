@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>shell-vq — shelled vector quantization demo</title>
+<style>
+:root{--bg:#0b0f14;--panel:#11161d;--line:#222c36;--txt:#e8ecef;--acc:#C4F03C;--mut:#9aa4ad}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 system-ui,sans-serif}
+header{padding:28px 20px 10px;max-width:960px;margin:0 auto}
+header a{color:var(--acc);text-decoration:none;font-weight:600}
+h1{margin:8px 0 4px;font-size:30px}h1 span{color:var(--acc)}
+.sub{color:var(--mut);max-width:760px;margin:0}
+main{max-width:960px;margin:0 auto;padding:10px 20px 40px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:14px 0}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+label{font-size:13px;color:var(--mut)}label b{color:var(--txt)}
+button{background:var(--acc);color:#111;border:0;border-radius:10px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:14px}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+input[type=range]{width:160px;accent-color:var(--acc)}
+input[type=checkbox]{accent-color:var(--acc);width:16px;height:16px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.stat{background:#0d1218;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.stat .k{font-size:12px;color:var(--mut)}.stat .v{font-size:20px;font-weight:800;color:var(--acc)}
+canvas{width:100%;max-width:900px;height:auto;background:#0d1218;border:1px solid var(--line);border-radius:10px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--mut);margin-top:8px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
+code{background:#000;padding:2px 6px;border-radius:6px;font-size:13px}
+.how{color:var(--mut);font-size:14px}.how b{color:var(--txt)}
+footer{opacity:.6;font-size:13px}a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+<a href="../../index.html">&larr; all builds</a>
+<h1>shell-vq <span>live demo</span></h1>
+<p class="sub">2D demo of shelled vector quantization: points form 3 radius shells, each shell gets 8 codebook entries + its own LS scale, and outer-shell vectors get a gated 1-bit residual refinement.</p>
+</header>
+<main>
+<div class="card">
+<div class="row">
+<button id="genBtn">Regenerate (seed <span id="seedVal">3</span>)</button>
+<label>Points <b id="nVal">400</b><br><input id="nPts" type="range" min="100" max="1000" step="50" value="400"></label>
+<label>Shell quantile q <b id="qVal">0.33</b><br><input id="q" type="range" min="0.20" max="0.45" step="0.01" value="0.33"></label>
+<button id="qBtn" class="ghost">Quantize</button>
+<label><input type="checkbox" id="refine" checked> residual-refine (outer shell)</label>
+</div>
+<div class="stats">
+<div class="stat"><div class="k">Flat VQ MSE</div><div class="v" id="mF">–</div></div>
+<div class="stat"><div class="k">Shelled MSE</div><div class="v" id="mS">–</div></div>
+<div class="stat"><div class="k">Refined MSE</div><div class="v" id="mR">–</div></div>
+<div class="stat"><div class="k">Shelled cut vs flat</div><div class="v" id="mC">–</div></div>
+<div class="stat"><div class="k">Refine drop (outer)</div><div class="v" id="mD">–</div></div>
+</div>
+</div>
+<div class="card">
+<h3 style="margin:0 0 8px">Scatter: points colored by shell, ✕ = codebook (8 per shell)</h3>
+<canvas id="cv" width="880" height="440"></canvas>
+<div class="legend">
+<span><span class="dot" style="background:#C4F03C"></span>inner</span>
+<span><span class="dot" style="background:#4aa8ff"></span>mid</span>
+<span><span class="dot" style="background:#ff6b6b"></span>outer</span>
+<span id="shellInfo"></span>
+</div>
+</div>
+<div class="card how">
+<h3 style="color:var(--txt);margin:0 0 6px">How it works</h3>
+<p><b>1. Shells:</b> point norms are split by quantiles <code>t1=Q(q), t2=Q(1−q)</code> into inner / mid / outer. <b>2. Codebook:</b> 8 unit directions per shell &times; per-shell LS scale <code>s=Σv·c/Σc·c</code> (mirrors <code>shell_vq/core.py: quantize_shelled</code>). <b>3. Residual refine:</b> outer vectors get <code>m·sign(residual)</code> with <code>m=mean|r|</code>, applied only if it strictly reduces that vector's error (mirrors <code>residual_refine</code>).</p>
+<p>Code folder: <a href="https://github.com/DastanZar/shell-vq">github.com/DastanZar/shell-vq</a> &middot; <a href="../../index.html#shell-vq">portfolio card</a></p>
+</div>
+</main>
+<script>
+"use strict";
+// ---- RNG ----
+let seed=3;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let R=mulberry32(seed);
+function randn(){let u=0,v=0;while(u===0)u=R();while(v===0)v=R();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+const SHELL_R=[1.1,3.0,6.0],SHELL_C=["#C4F03C","#4aa8ff","#ff6b6b"],K_CB=8;
+let pts=[]; // {x,y}
+function gen(n){
+  R=mulberry32(seed);pts=[];
+  for(let i=0;i<n;i++){
+    const k=Math.floor(R()*3),a=R()*2*Math.PI,r=SHELL_R[k]+randn()*0.35;
+    pts.push({x:r*Math.cos(a),y:r*Math.sin(a)});
+  }
+}
+// shells from norm quantiles (mirror core.py)
+function quantile(sorted,q){if(!sorted.length)return 0;const p=q*(sorted.length-1),i=Math.floor(p),f=p-i;return sorted[i]+(sorted[Math.min(i+1,sorted.length-1)]-sorted[i])*f;}
+function computeShells(q){
+  const norms=pts.map(p=>Math.hypot(p.x,p.y)).sort((a,b)=>a-b);
+  const t1=quantile(norms,q),t2=quantile(norms,1-q);
+  const sh=pts.map(p=>{const n=Math.hypot(p.x,p.y);return n>t2?2:(n>t1?1:0);});
+  return{sh,t1,t2};
+}
+// 8 unit directions (deterministic)
+function dirs(){const d=[];for(let i=0;i<K_CB;i++){const a=2*Math.PI*i/K_CB;d.push([Math.cos(a),Math.sin(a)]);}return d;}
+const DIRS=dirs();
+function lsScaleShell(vecs,assign){
+  let num=0,den=0;
+  for(let i=0;i<vecs.length;i++){const c=DIRS[assign[i]];num+=vecs[i][0]*c[0]+vecs[i][1]*c[1];den+=c[0]*c[0]+c[1]*c[1];}
+  if(!(den>1e-18))return 0;
+  const s=num/den;
+  if(!isFinite(s)||s<=0){let m=0;for(const v of vecs)m+=Math.hypot(v[0],v[1]);return vecs.length?m/vecs.length:0;}
+  return s;
+}
+function assignShell(vecs,scale){
+  return vecs.map(v=>{
+    const nx=v[0]/scale,ny=v[1]/scale;let bi=0,bd=1e300;
+    for(let j=0;j<DIRS.length;j++){const dx=nx-DIRS[j][0],dy=ny-DIRS[j][1],d=dx*dx+dy*dy;if(d<bd){bd=d;bi=j;}}
+    return bi;
+  });
+}
+// flat baseline: one global scale, 8 shared directions
+function flatMSE(){
+  const vecs=pts.map(p=>[p.x,p.y]);
+  let mean=0;for(const v of vecs)mean+=Math.hypot(v[0],v[1]);mean/=vecs.length||1;
+  let idx=assignShell(vecs,mean||1);
+  const s=lsScaleShell(vecs,idx)||mean||1;
+  idx=assignShell(vecs,s);
+  const s2=lsScaleShell(vecs,idx)||s;
+  let e=0;for(let i=0;i<vecs.length;i++){const c=DIRS[idx[i]];e+=(vecs[i][0]-s2*c[0])**2+(vecs[i][1]-s2*c[1])**2;}
+  return e/(2*vecs.length);
+}
+function run(){
+  const n=parseInt(document.getElementById("nPts").value,10);
+  const q=parseFloat(document.getElementById("q").value);
+  document.getElementById("nVal").textContent=n;
+  document.getElementById("qVal").textContent=q.toFixed(2);
+  if(pts.length!==n)gen(n);
+  const useRef=document.getElementById("refine").checked;
+  const{sh,t1,t2}=computeShells(q);
+  const vecs=pts.map(p=>[p.x,p.y]);
+  const recon=new Array(vecs.length),scales={};
+  const shellIdx={0:[],1:[],2:[]};
+  for(let i=0;i<vecs.length;i++)shellIdx[sh[i]].push(i);
+  // per-shell: seed scale = mean norm, assign, LS scale, re-assign, LS scale
+  for(let s=0;s<3;s++){
+    const ids=shellIdx[s];
+    if(!ids.length){scales[s]=0;continue;}
+    const vv=ids.map(i=>vecs[i]);
+    let m=0;for(const v of vv)m+=Math.hypot(v[0],v[1]);m/=vv.length;
+    let a=assignShell(vv,m||1);
+    let sc=lsScaleShell(vv,a)||m;
+    a=assignShell(vv,sc||m||1);
+    sc=lsScaleShell(vv,a)||sc;
+    scales[s]=sc;
+    ids.forEach((gi,k)=>{const c=DIRS[a[k]];recon[gi]=[sc*c[0],sc*c[1]];recon[gi]._cb=a[k];});
+  }
+  const mse=v=>{let e=0;for(let i=0;i<vecs.length;i++)e+=(vecs[i][0]-v[i][0])**2+(vecs[i][1]-v[i][1])**2;return e/(2*vecs.length);};
+  const mFlat=flatMSE(),mShell=mse(recon);
+  // residual refine on outer shell (gated per vector)
+  let mRef=mShell,applied=0,outerBefore=0,outerAfter=0;
+  const outerIds=shellIdx[2];
+  if(outerIds.length){
+    let eb=0,ea=0;
+    for(const i of outerIds){
+      const rx=vecs[i][0]-recon[i][0],ry=vecs[i][1]-recon[i][1];
+      const m=(Math.abs(rx)+Math.abs(ry))/2;
+      eb+=rx*rx+ry*ry;
+      let cx=recon[i][0],cy=recon[i][1];
+      if(m>1e-18){
+        const sx=rx===0?1:Math.sign(rx),sy=ry===0?1:Math.sign(ry);
+        const qx=recon[i][0]+m*sx,qy=recon[i][1]+m*sy;
+        const eOld=rx*rx+ry*ry,eNew=(vecs[i][0]-qx)**2+(vecs[i][1]-qy)**2;
+        if(eNew<eOld){cx=qx;cy=qy;applied++;}
+      }
+      ea+=(vecs[i][0]-cx)**2+(vecs[i][1]-cy)**2;
+      if(useRef){recon[i]=[cx,cy];}
+    }
+    outerBefore=eb/(2*outerIds.length);outerAfter=(useRef?ea:eb)/(2*outerIds.length);
+    if(useRef)mRef=mse(recon);
+  }
+  document.getElementById("mF").textContent=mFlat.toFixed(3);
+  document.getElementById("mS").textContent=mShell.toFixed(3);
+  document.getElementById("mR").textContent=useRef?mRef.toFixed(3):"off";
+  document.getElementById("mC").textContent=(100*(1-mShell/mFlat)).toFixed(1)+"%";
+  document.getElementById("mD").textContent=outerIds.length?((useRef?(100*(1-outerAfter/outerBefore)):0).toFixed(1)+"% ("+applied+"/"+outerIds.length+")"):"–";
+  document.getElementById("shellInfo").textContent=
+    `t1=${t1.toFixed(2)} t2=${t2.toFixed(2)} · counts ${shellIdx[0].length}/${shellIdx[1].length}/${shellIdx[2].length} · scales ${scales[0].toFixed(2)}/${scales[1].toFixed(2)}/${scales[2].toFixed(2)}`;
+  draw(sh,scales);
+}
+function draw(sh,scales){
+  const c=document.getElementById("cv"),g=c.getContext("2d");
+  const W=c.width,H=c.height;g.clearRect(0,0,W,H);
+  g.fillStyle="#0d1218";g.fillRect(0,0,W,H);
+  const ext=7.5,sx=W/(2*ext),sy=H/(2*ext),X=x=>W/2+x*sx,Y=y=>H/2-y*sy;
+  g.strokeStyle="#222c36";g.beginPath();g.moveTo(0,H/2);g.lineTo(W,H/2);g.moveTo(W/2,0);g.lineTo(W/2,H);g.stroke();
+  for(let i=0;i<pts.length;i++){
+    g.fillStyle=SHELL_C[sh[i]];g.globalAlpha=0.75;
+    g.beginPath();g.arc(X(pts[i].x),Y(pts[i].y),2.4,0,7);g.fill();
+  }
+  g.globalAlpha=1;
+  // codebook: 8 per shell as X markers
+  for(let s=0;s<3;s++){
+    g.strokeStyle=SHELL_C[s];g.lineWidth=2;
+    for(let j=0;j<K_CB;j++){
+      const px=DIRS[j][0]*scales[s],py=DIRS[j][1]*scales[s];
+      const cx=X(px),cy=Y(py),r=6;
+      g.beginPath();g.moveTo(cx-r,cy-r);g.lineTo(cx+r,cy+r);g.moveTo(cx+r,cy-r);g.lineTo(cx-r,cy+r);g.stroke();
+    }
+  }
+  g.lineWidth=1;
+}
+document.getElementById("genBtn").onclick=()=>{seed=(seed*9301+49297)%233280;document.getElementById("seedVal").textContent=seed;gen(parseInt(document.getElementById("nPts").value,10));run();};
+document.getElementById("qBtn").onclick=run;
+document.getElementById("nPts").oninput=()=>{gen(parseInt(document.getElementById("nPts").value,10));run();};
+document.getElementById("q").oninput=run;
+document.getElementById("refine").onchange=run;
+gen(400);run();
+</script>
+</body>
+</html>

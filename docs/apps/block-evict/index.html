@@ -1,0 +1,122 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>block-evict — block-aligned eviction playground</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b0f14;color:#e8ecef;font:15px/1.5 system-ui,sans-serif}
+header{padding:28px 20px;border-bottom:1px solid #222c36;background:#0e141b}
+h1{margin:0;font-size:26px}h1 span{color:#C4F03C}.sub{opacity:.75;max-width:840px}
+a{color:#C4F03C}main{max-width:1080px;margin:0 auto;padding:20px}
+.panel{background:#11161d;border:1px solid #222c36;border-radius:14px;padding:18px;margin:14px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button{background:#C4F03C;color:#111;border:0;font-weight:700;padding:10px 18px;border-radius:10px;cursor:pointer}
+button.ghost{background:#1b232c;color:#e8ecef;border:1px solid #333}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0}
+.card{background:#0d1218;border:1px solid #222c36;border-radius:12px;padding:12px}
+.card h3{margin:0 0 6px;font-size:13px;opacity:.7}.card .v{font-size:22px;font-weight:800;color:#C4F03C}
+canvas{width:100%;background:#000;border-radius:12px;border:1px solid #222c36;cursor:crosshair}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-top:8px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:baseline}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+th,td{padding:6px 8px;border-bottom:1px solid #1e2730;text-align:right}th:first-child,td:first-child{text-align:left}
+.note{font-size:13px;opacity:.7}code{background:#000;padding:2px 6px;border-radius:6px}
+</style></head><body>
+<header><a href="../../index.html">← back</a>
+<h1>block-evict <span>block-aligned eviction</span></h1>
+<p class="sub">16×8 paged-KV grid (128 blocks). Each block holds 16 token slots + a mean future-attention score. Click a block to toggle low/high attention. Eviction scores <b>whole blocks</b> and frees the lowest — never splits a block, never breaks COW pairs.</p></header>
+<main>
+<div class="panel row">
+  <button id="evict">Evict 4 blocks</button>
+  <button id="fork" class="ghost">Fork (COW pair demo)</button>
+  <button id="reset" class="ghost">Reset grid</button>
+  <span class="note">Click block = toggle attention 0.05 ↔ 0.95 · score = meanAttn − 0.1·frag</span>
+</div>
+<div class="panel">
+  <div class="cards">
+    <div class="card"><h3>Freed blocks</h3><div class="v" id="mFreed">0 / 128</div></div>
+    <div class="card"><h3>Fragmentation</h3><div class="v" id="mFrag">–</div></div>
+    <div class="card"><h3>COW pairs retained</h3><div class="v" id="mCow">0</div></div>
+  </div>
+  <p class="note" id="cowNote">No COW pairs yet — press Fork to clone a block copy-on-write.</p>
+</div>
+<div class="panel">
+<canvas id="cv" width="960" height="480"></canvas>
+<div class="legend">
+  <span><span class="sw" style="background:#C4F03C"></span>high attention (keep)</span>
+  <span><span class="sw" style="background:#3a2b00"></span>low attention (evictable)</span>
+  <span><span class="sw" style="background:#111;border:1px solid #555"></span>freed</span>
+  <span><span class="sw" style="background:#7cc4ff"></span>COW-shared (pinned)</span>
+  <span><span class="sw" style="background:#ff7c7c"></span>evicting…</span>
+</div></div>
+<div class="panel"><h3 style="margin-top:0">Block scores (lowest first, top 16)</h3>
+<table id="tbl"><thead><tr><th>block</th><th>mean attn</th><th>occupancy</th><th>frag</th><th>score</th><th>state</th></tr></thead><tbody></tbody></table>
+<p class="note">score <code>= meanAttn − 0.1 × frag</code>, frag = 1 − occupancy/16. COW blocks are pinned (score = ∞) so the fork child survives eviction.</p></div>
+</main>
+<script>
+const COLS=16,ROWS=8,N=COLS*ROWS,SLOTS=16;
+let blocks=[],cowPairs=0,anim=new Set();
+function rng(seed){let a=seed>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function init(){const r=rng(42);blocks=[];cowPairs=0;anim.clear();
+  for(let i=0;i<N;i++){blocks.push({id:i,attn:+(r().toFixed(2)),occ:4+Math.floor(r()*13),freed:false,cow:0})}
+  // a few naturally-low blocks so first evict is visible
+  for(let k=0;k<10;k++){blocks[Math.floor(r()*N)].attn=+(0.02+r()*0.12).toFixed(2)}
+  render();}
+function score(b){if(b.freed)return -1;if(b.cow>0)return Infinity;const frag=1-b.occ/SLOTS;return b.attn-0.1*frag}
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function render(){ctx.clearRect(0,0,cv.width,cv.height);
+  const gw=cv.width/COLS,gh=cv.height/ROWS;
+  blocks.forEach((b,i)=>{const x=(i%COLS)*gw,y=Math.floor(i/COLS)*gh;
+    let fill;
+    if(anim.has(b.id))fill="#ff7c7c";
+    else if(b.freed)fill="#0a0d11";
+    else if(b.cow>0)fill="#7cc4ff";
+    else{const t=b.attn;fill=t>0.6?"#C4F03C":t>0.3?"#6d8a1f":"#3a2b00"}
+    ctx.fillStyle=fill;ctx.strokeStyle="#222c36";
+    ctx.beginPath();ctx.roundRect?ctx.roundRect(x+3,y+3,gw-6,gh-6,8):ctx.rect(x+3,y+3,gw-6,gh-6);ctx.fill();ctx.stroke();
+    ctx.fillStyle=b.freed||b.cow?"#0b0f14":(b.attn>0.5?"#111":"#e8ecef");
+    ctx.font="bold 12px system-ui";ctx.textAlign="center";
+    if(!b.freed)ctx.fillText(b.attn.toFixed(2),x+gw/2,y+gh/2-2);
+    ctx.font="10px system-ui";if(!b.freed)ctx.fillText(b.cow?("COW×"+b.cow):(b.occ+"/16"),x+gw/2,y+gh/2+13);
+  });
+  updateStats();}
+function updateStats(){
+  const freed=blocks.filter(b=>b.freed).length;
+  document.getElementById("mFreed").textContent=`${freed} / ${N}`;
+  // frag % = wasted slots inside live blocks
+  const live=blocks.filter(b=>!b.freed);
+  const waste=live.reduce((a,b)=>a+(SLOTS-b.occ),0);
+  const frag=live.length?waste/(live.length*SLOTS)*100:0;
+  document.getElementById("mFrag").textContent=frag.toFixed(1)+" %";
+  document.getElementById("mCow").textContent=cowPairs;
+  document.getElementById("cowNote").textContent=cowPairs?`${cowPairs} COW pair(s) retained — eviction skipped ${cowPairs*2} shared block(s), refs intact.`
+    :"No COW pairs yet — press Fork to clone a block copy-on-write.";
+  const tb=document.querySelector("#tbl tbody");tb.innerHTML="";
+  [...blocks].sort((a,b)=>score(a)-score(b)).slice(0,16).forEach(b=>{
+    const s=score(b);const tr=document.createElement("tr");
+    tr.innerHTML=`<td>#${b.id}</td><td>${b.freed?"–":b.attn.toFixed(2)}</td><td>${b.freed?"–":b.occ+"/16"}</td><td>${b.freed?"–":(1-b.occ/SLOTS).toFixed(2)}</td><td>${s===Infinity?"pinned ∞":s.toFixed(3)}</td><td>${b.freed?"freed":b.cow?"COW×"+b.cow:"live"}</td>`;
+    tb.appendChild(tr)});
+}
+document.getElementById("evict").onclick=()=>{
+  const cands=blocks.filter(b=>!b.freed&&b.cow===0).sort((a,b)=>score(a)-score(b)).slice(0,4);
+  if(!cands.length)return;
+  cands.forEach(b=>anim.add(b.id));render();
+  setTimeout(()=>{cands.forEach(b=>{b.freed=true;anim.delete(b.id)});render()},450);
+};
+document.getElementById("fork").onclick=()=>{
+  // pick first two adjacent live non-COW blocks as parent/child COW pair
+  const live=blocks.filter(b=>!b.freed&&b.cow===0);
+  if(live.length<2)return;
+  const a=live[Math.floor(Math.random()*live.length)];
+  let bi=(a.id+1)%N,guard=0;
+  while((blocks[bi].freed||blocks[bi].cow>0||bi===a.id)&&guard++<N)bi=(bi+1)%N;
+  const b=blocks[bi];
+  a.cow=2;b.cow=2;b.attn=a.attn;b.occ=a.occ;cowPairs++;
+  render();
+};
+document.getElementById("reset").onclick=init;
+cv.onclick=e=>{const r=cv.getBoundingClientRect();
+  const px=(e.clientX-r.left)*(cv.width/r.width),py=(e.clientY-r.top)*(cv.height/r.height);
+  const c=Math.floor(px/(cv.width/COLS)),rw=Math.floor(py/(cv.height/ROWS));
+  const b=blocks[rw*COLS+c];if(!b||b.freed)return;
+  b.attn=b.attn>0.5?0.05:0.95;render();};
+init();
+</script></body></html>

@@ -1,0 +1,163 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>dual-bias-fp8 — per-block FP8 playground</title>
+<style>
+:root{--bg:#0b0f14;--panel:#11161d;--line:#222c36;--txt:#e8ecef;--acc:#C4F03C;--mut:#8b98a5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 system-ui,sans-serif}
+header{padding:28px 20px;text-align:center;background:radial-gradient(800px 260px at 50% -60px,#26331a,#0b0f14)}
+h1{margin:0;font-size:28px}h1 span{color:var(--acc)}.sub{opacity:.75;max-width:720px;margin:8px auto}
+a{color:var(--acc)}.wrap{max-width:980px;margin:0 auto;padding:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button{background:var(--acc);color:#111;border:0;font-weight:700;padding:9px 16px;border-radius:10px;cursor:pointer}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+button:disabled{opacity:.4;cursor:default}
+label{font-size:13px;color:var(--mut)}input[type=range]{accent-color:var(--acc);width:180px}
+.stat{display:inline-block;background:#000;border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin:4px 8px 4px 0}
+.stat b{color:var(--acc)}.stat small{color:var(--mut);display:block;font-size:11px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chip{border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12px;background:#000}
+.chip.e5{border-color:var(--acc)}.chip.e5 b{color:var(--acc)}.chip.e4 b{color:#5BC0EB}
+canvas{width:100%;background:#000;border:1px solid var(--line);border-radius:10px;display:block}
+h3{margin:6px 0 8px;font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+code{background:#000;padding:2px 6px;border-radius:6px;font-size:13px}
+footer{text-align:center;padding:24px;opacity:.6;font-size:13px}
+.note{font-size:12px;color:var(--mut)}
+</style></head><body>
+<header><h1>dual-bias-fp8 <span>playground</span></h1>
+<p class="sub">K=256 spiky weights → 8 blocks × 32. Each block picks <b>E5M2</b> vs <b>E4M3</b> by range test + integer bias in [11,19]. Vanilla JS FP8 encode/decode, no deps.</p>
+<p><a href="../../index.html">← back to portfolio</a></p></header>
+<div class="wrap">
+<div class="card"><div class="row">
+<button id="regen">↻ regenerate</button>
+<button id="toggle" class="ghost">dual-bias: ON</button>
+<label>manual bias <b id="biasVal" style="color:var(--acc)">15</b>
+<input id="bias" type="range" min="11" max="19" step="1" value="15"></label>
+<span class="note" id="biasNote">dual-bias ON → per-block auto bias (slider ignored)</span>
+</div></div>
+<div class="card">
+<span class="stat"><small>ours MSE</small><b id="mOurs">–</b></span>
+<span class="stat"><small>fp16 MSE (ref)</small><b id="mFp16">–</b></span>
+<span class="stat"><small>uniform E4M3/b15 MSE</small><b id="mUni">–</b></span>
+<span class="stat"><small>size ours / fp16</small><b id="mBytes">–</b></span>
+<span class="stat"><small>formats</small><b id="mFmt">–</b></span>
+<div class="chips" id="chips"></div>
+</div>
+<div class="card"><h3>weight histogram — original (gray) vs FP8 dequant (accent)</h3><canvas id="hist" width="940" height="240"></canvas></div>
+<div class="card"><h3>block map — 8 blocks, color = chosen format, label = bias</h3><canvas id="bmap" width="940" height="110"></canvas>
+<p class="note">Range test mirrors <code>choose_format</code>: amax &gt; 240 → E5M2; amax/rms &gt; 12 → E5M2, else E4M3. Bias: <code>round(15 − log2(amax / (0.9·fmax)))</code> clipped to [11,19]. Uniform baseline = all-E4M3, bias 15.</p></div>
+</div><footer>dual-bias-fp8 · OCP FP8 grids (E5M2 bias 15, E4M3 bias 8) · MIT</footer>
+<script>
+"use strict";
+const K=256,BLK=32,NB=8,E5MAX=57344,E4MAX=240,RTH=12,BSTD=15,BMIN=11,BMAX=19;
+let W=[],dualOn=true,res=null;
+// ---- RNG ----
+function randn(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+// ---- FP8 grids (OCP, finite codes only) ----
+function buildGrids(){
+  const g={e5m2:{c:[],v:[]},e4m3:{c:[],v:[]}};
+  for(let b=0;b<256;b++){const s=(b>>7)&1,e=(b>>2)&0x1f,m=b&3,sg=s?-1:1;
+    if(e===31)continue;const v=e===0?sg*Math.pow(2,-14)*(m/4):sg*Math.pow(2,e-15)*(1+m/4);
+    g.e5m2.c.push(b);g.e5m2.v.push(v);}
+  for(let b=0;b<256;b++){const s=(b>>7)&1,e=(b>>3)&0xf,m=b&7;if(e===15&&m===7)continue;
+    const sg=s?-1:1;let v=e===0?sg*Math.pow(2,-7)*(m/8):sg*Math.pow(2,e-8)*(1+m/8);
+    if(Math.abs(v)>E4MAX)v=Math.sign(v)*E4MAX;g.e4m3.c.push(b);g.e4m3.v.push(v);}
+  for(const k of["e5m2","e4m3"]){const L=new Float64Array(256);
+    g[k].c.forEach((c,i)=>L[c]=g[k].v[i]);
+    if(k==="e5m2")for(let b=0;b<256;b++){if(((b>>2)&0x1f)===31)L[b]=(((b>>7)&1)?-1:1)*E5MAX;}
+    else{L[0x7f]=E4MAX;L[0xff]=-E4MAX;}g[k].lut=L;}
+  return g;
+}
+const G=buildGrids();
+function encode(xs,fmt){const g=G[fmt],fmax=fmt==="e5m2"?E5MAX:E4MAX,out=new Uint8Array(xs.length);
+  let pc=g.c[0],nc=g.c[0];g.v.forEach((v,i)=>{if(v===fmax)pc=g.c[i];if(v===-fmax)nc=g.c[i];});
+  for(let i=0;i<xs.length;i++){const x=xs[i];
+    if(Math.abs(x)>fmax){out[i]=x>0?pc:nc;continue;}
+    let bi=0,bd=Infinity;for(let j=0;j<g.v.length;j++){const d=Math.abs(x-g.v[j]);if(d<bd){bd=d;bi=j;}}
+    out[i]=g.c[bi];}return out;}
+function decode(codes,fmt){const L=G[fmt].lut,o=new Float64Array(codes.length);
+  for(let i=0;i<codes.length;i++)o[i]=L[codes[i]];return o;}
+// ---- policy (mirrors dual_bias_fp8/core.py) ----
+function amax(a){let m=0;for(const x of a){const v=Math.abs(x);if(v>m)m=v;}return m;}
+function rms(a){let s=0;for(const x of a)s+=x*x;return Math.sqrt(s/a.length);}
+function chooseFormat(b){const a=amax(b);if(!isFinite(a)||a===0)return"e4m3";
+  if(a>E4MAX)return"e5m2";return(a/(rms(b)+1e-12))>RTH?"e5m2":"e4m3";}
+function calibBias(b,fmt){const a=amax(b);if(!isFinite(a)||a===0)return BSTD;
+  const f=fmt==="e5m2"?E5MAX:E4MAX;
+  return Math.max(BMIN,Math.min(BMAX,Math.round(BSTD-Math.log2(a/(f*0.9)))));}
+// ---- fp16 reference ----
+function f16val(x){const u=new Uint32Array(new Float32Array([x]).buffer)[0];
+  const s=(u>>16)&0x8000;let e=((u>>23)&0xff)-112;const m=u&0x7fffff;let h;
+  if(e<=0){if(e<-10)h=s;else{const mm=m|0x800000,t=14-e;h=s+((mm>>t)>>13);}}
+  else if(e>=31)h=s|0x7bff;else h=s|(e<<10)|(m>>13);
+  const hs=h&0x8000,he=(h>>10)&0x1f,hm=h&0x3ff,sg=hs?-1:1;
+  if(he===0)return sg*(hm/1024)*Math.pow(2,-14);
+  if(he===31)return sg*65504;return sg*Math.pow(2,he-15)*(1+hm/1024);}
+// ---- data ----
+function genWeights(){W=new Array(K);
+  for(let b=0;b<NB;b++)for(let i=0;i<BLK;i++){const j=b*BLK+i;
+    if(b%2===0)W[j]=randn()*0.55;                 // calm blocks
+    else W[j]=Math.random()<0.10?randn()*16:randn()*0.8;} // spiky blocks
+  W[7*BLK+3]=350;W[7*BLK+3]*=(Math.random()<0.5?-1:1); // giant outlier forces E5M2
+  W[3*BLK+9]=randn()*30;}
+function quantize(manualBias){const per=[];let codes=[],rec=new Float64Array(K);
+  for(let b=0;b<NB;b++){const blk=W.slice(b*BLK,(b+1)*BLK);
+    const fmt=dualOn?chooseFormat(blk):"e4m3";
+    const bias=dualOn?calibBias(blk,fmt):manualBias;
+    const sc=Math.pow(2,BSTD-bias),xs=blk.map(x=>x/sc);
+    const cd=encode(xs,fmt),dec=decode(cd,fmt);
+    for(let i=0;i<BLK;i++)rec[b*BLK+i]=dec[i]*sc;
+    per.push({fmt,bias,amax:amax(blk)});}
+  return{per,rec};}
+function mse(a,b){let s=0;for(let i=0;i<a.length;i++){const d=a[i]-b[i];s+=d*d;}return s/a.length;}
+function fmtSci(x){if(x===0)return"0";const e=Math.floor(Math.log10(x));const m=x/Math.pow(10,e);return m.toFixed(2)+"e"+e;}
+function refresh(){const mb=+$("bias").value;$("biasVal").textContent=mb;
+  $("biasNote").textContent=dualOn?"dual-bias ON → per-block auto bias (slider ignored)":"dual-bias OFF → all blocks E4M3 @ slider bias";
+  res=quantize(mb);
+  const uni=(()=>{const r=new Float64Array(K);for(let b=0;b<NB;b++){const blk=W.slice(b*BLK,(b+1)*BLK);
+    const sc=Math.pow(2,BSTD-15),dec=decode(encode(blk.map(x=>x/sc),"e4m3"),"e4m3");
+    for(let i=0;i<BLK;i++)r[b*BLK+i]=dec[i]*sc;}return r;})();
+  const f16=W.map(f16val);
+  $("mOurs").textContent=fmtSci(mse(W,res.rec));
+  $("mFp16").textContent=fmtSci(mse(W,f16));
+  $("mUni").textContent=fmtSci(mse(W,uni));
+  $("mBytes").textContent="258 B / 512 B (1.98×)";
+  const n5=res.per.filter(p=>p.fmt==="e5m2").length;
+  $("mFmt").textContent=n5+"× E5M2 · "+(NB-n5)+"× E4M3";
+  const ch=$("chips");ch.innerHTML="";
+  res.per.forEach((p,i)=>{const d=document.createElement("div");
+    d.className="chip "+(p.fmt==="e5m2"?"e5":"e4");
+    d.innerHTML="<b>B"+i+" "+(p.fmt==="e5m2"?"E5M2":"E4M3")+"</b> · bias "+p.bias+" · amax "+(p.amax>100?p.amax.toFixed(0):p.amax.toFixed(2));
+    ch.appendChild(d);});
+  drawHist();drawMap();}
+function $(id){return document.getElementById(id);}
+function drawHist(){const c=$("hist"),x=c.getContext("2d"),Wc=c.width,H=c.height;x.clearRect(0,0,Wc,H);
+  let A=0;for(const v of W)A=Math.max(A,Math.abs(v));A=Math.min(A,60);
+  const NBIN=64,h0=new Array(NBIN).fill(0),h1=new Array(NBIN).fill(0);
+  const bin=v=>Math.max(0,Math.min(NBIN-1,Math.floor((v+A)/(2*A)*NBIN)));
+  W.forEach(v=>h0[bin(Math.max(-A,Math.min(A,v)))]++);
+  res.rec.forEach(v=>h1[bin(Math.max(-A,Math.min(A,v)))]++);
+  const mx=Math.max(...h0,...h1,1),bh=H-34;
+  x.strokeStyle="#222c36";x.fillStyle="#8b98a5";x.font="11px system-ui";
+  for(let gLine=0;gLine<=4;gLine++){const y=8+bh*gLine/4;x.beginPath();x.moveTo(34,y);x.lineTo(Wc-8,y);x.stroke();}
+  for(let i=0;i<NBIN;i++){const bw=(Wc-44)/NBIN;
+    x.fillStyle="#3a4550";x.fillRect(34+i*bw+1,8+bh*(1-h0[i]/mx),bw-2,bh*h0[i]/mx);
+    x.fillStyle="#C4F03C";x.fillRect(34+i*bw+1,8+bh-h1[i]/mx*bh-2,bw-2,2);}
+  x.fillStyle="#8b98a5";x.fillText("-"+A.toFixed(1),34,H-6);x.fillText("0",(Wc)/2,H-6);x.fillText("+"+A.toFixed(1),Wc-52,H-6);
+  x.fillStyle="#C4F03C";x.fillText("— FP8 dequant",70,H-6);}
+function drawMap(){const c=$("bmap"),x=c.getContext("2d");x.clearRect(0,0,c.width,c.height);
+  const cw=(c.width-16)/NB;
+  res.per.forEach((p,i)=>{const px=8+i*cw;
+    x.fillStyle=p.fmt==="e5m2"?"#C4F03C":"#131b24";
+    x.strokeStyle=p.fmt==="e5m2"?"#C4F03C":"#5BC0EB";x.lineWidth=2;
+    x.beginPath();x.rect(px+3,10,cw-6,60);p.fmt==="e5m2"?x.fill():x.stroke();
+    x.fillStyle=p.fmt==="e5m2"?"#111":"#e8ecef";x.font="bold 13px system-ui";x.textAlign="center";
+    x.fillText("B"+i,px+cw/2,34);x.font="12px system-ui";
+    x.fillText(p.fmt==="e5m2"?"E5M2":"E4M3",px+cw/2,52);
+    x.fillStyle="#8b98a5";x.fillText("bias "+p.bias,px+cw/2,90);});
+  x.textAlign="left";}
+$("regen").onclick=()=>{genWeights();refresh();};
+$("toggle").onclick=e=>{dualOn=!dualOn;e.target.textContent="dual-bias: "+(dualOn?"ON":"OFF");e.target.className=dualOn?"ghost":"";refresh();};
+$("bias").oninput=refresh;
+genWeights();refresh();
+</script></body></html>

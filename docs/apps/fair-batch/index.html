@@ -1,0 +1,129 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>fair-batch — scheduler playground</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b0f14;color:#e8ecef;font:15px/1.5 system-ui,sans-serif}
+header{padding:28px 20px;border-bottom:1px solid #222c36;background:#0e141b}
+h1{margin:0;font-size:26px}h1 span{color:#C4F03C}.sub{opacity:.75;max-width:820px}
+a{color:#C4F03C}main{max-width:1080px;margin:0 auto;padding:20px}
+.panel{background:#11161d;border:1px solid #222c36;border-radius:14px;padding:18px;margin:14px 0}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+label{display:block;font-size:13px;opacity:.9;margin-bottom:6px}label b{color:#C4F03C}
+input[type=range]{width:100%}input[type=number]{width:90px;background:#000;color:#e8ecef;border:1px solid #333;border-radius:8px;padding:6px}
+button{background:#C4F03C;color:#111;border:0;font-weight:700;padding:10px 18px;border-radius:10px;cursor:pointer}
+button.ghost{background:#1b232c;color:#e8ecef;border:1px solid #333}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px}
+.card{background:#0d1218;border:1px solid #222c36;border-radius:12px;padding:12px}
+.card h3{margin:0 0 6px;font-size:13px;opacity:.7}.card .v{font-size:22px;font-weight:800}
+.fair .v{color:#C4F03C}.fifo .v{color:#7cc4ff}
+canvas{width:100%;background:#000;border-radius:12px;border:1px solid #222c36}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+th,td{padding:6px 8px;border-bottom:1px solid #1e2730;text-align:right}th:first-child,td:first-child{text-align:left}
+.switch{display:flex;align-items:center;gap:8px}
+.note{font-size:13px;opacity:.7}
+code{background:#000;padding:2px 6px;border-radius:6px}
+</style></head><body>
+<header><a href="../../index.html">← back</a>
+<h1>fair-batch <span>scheduler playground</span></h1>
+<p class="sub">Static FIFO vs fair deficit-round-robin. Poisson arrivals, linear prefill + batched decode, optional DVFS power cap. Seeded RNG so runs are reproducible.</p></header>
+<main>
+<div class="panel controls">
+  <div><label>Arrival rate <b id="vRate">2.0 req/s</b></label>
+    <input id="rate" type="range" min="0.5" max="4" step="0.1" value="2"></div>
+  <div><label>Users <b id="vUsers">4</b></label>
+    <input id="users" type="range" min="2" max="6" step="1" value="4"></div>
+  <div><label>Seed</label><input id="seed" type="number" value="7" min="0" max="9999"></div>
+  <div class="switch"><input id="cap" type="checkbox" checked>
+    <label for="cap">Power cap ON (DVFS 280W, 1.25× slower) — off = 400W full speed</label></div>
+  <div><label>&nbsp;</label><button id="run">Run simulation</button></div>
+</div>
+<div class="panel">
+  <div class="cards">
+    <div class="card fifo"><h3>FIFO · Jain index</h3><div class="v" id="jFifo">–</div></div>
+    <div class="card fair"><h3>Fair DRR · Jain index</h3><div class="v" id="jFair">–</div></div>
+    <div class="card fifo"><h3>FIFO · p99 e2e (s)</h3><div class="v" id="pFifo">–</div></div>
+    <div class="card fair"><h3>Fair DRR · p99 e2e (s)</h3><div class="v" id="pFair">–</div></div>
+    <div class="card fifo"><h3>FIFO · J/token</h3><div class="v" id="eFifo">–</div></div>
+    <div class="card fair"><h3>Fair DRR · J/token</h3><div class="v" id="eFair">–</div></div>
+  </div>
+  <p class="note" id="summary">Press Run.</p>
+</div>
+<div class="panel"><h3 style="margin-top:0">TTFT scatter — static FIFO (blue) vs fair DRR (green)</h3>
+<canvas id="cv" width="960" height="340"></canvas>
+<p class="note">x = request completion order, y = TTFT (s). Green fair cluster should sit lower & tighter under load; power cap shifts both up but saves J/token.</p></div>
+<div class="panel"><h3 style="margin-top:0">Per-user completed tokens</h3>
+<table id="tbl"><thead><tr><th>user</th><th>FIFO tok</th><th>Fair tok</th></tr></thead><tbody></tbody></table>
+<p class="note">Model: prefill <code>2 + 0.15·prompt</code> ms · decode step <code>3 + 0.8·batch</code> ms (×1.25 under cap) · max batch 8 · T=20 s window.</p></div>
+</main>
+<script>
+function mulberry(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const $=id=>document.getElementById(id);
+$("rate").oninput=e=>$("vRate").textContent=(+e.target.value).toFixed(1)+" req/s";
+$("users").oninput=e=>$("vUsers").textContent=e.target.value;
+function poissonArrivals(rng,rate,T){const t=[];let now=0;while(true){const u=Math.max(rng(),1e-9);now+=-Math.log(u)/rate;if(now>T)break;t.push(now)}return t}
+function genReqs(rate,nUsers,seed){const rng=mulberry(seed);const T=20;const arr=poissonArrivals(rng,rate,T);
+  return arr.map((a,i)=>({id:i,arr:a,user:Math.floor(rng()*nUsers),prompt:8+Math.floor(rng()*57),decode:16+Math.floor(rng()*113)}))}
+function jain(xs){const s=xs.reduce((a,b)=>a+b,0);if(s===0)return 0;const q=xs.reduce((a,b)=>a+b*b,0);return s*s/(xs.length*q)}
+function p99(a){if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(0.99*s.length))]}
+function simulate(reqs,nUsers,policy,cap){
+  const qs=policy==='fifo'?[...reqs].sort((a,b)=>a.arr-b.arr)
+    :(() => { // DRR: per-user queues, round-robin with deficit (quantum 1 req, heavy users can't hog batch)
+      const per=Array.from({length:nUsers},()=>[]);[...reqs].sort((a,b)=>a.arr-b.arr).forEach(r=>per[r.user].push(r));
+      const out=[];let deficit=new Array(nUsers).fill(1);let progress=true;
+      while(progress){progress=false;for(let u=0;u<nUsers;u++){if(per[u].length&&deficit[u]>=1){out.push(per[u].shift());deficit[u]--;progress=true}}}
+      // leftover (shouldn't happen with quantum 1, but drain)
+      per.forEach(q=>out.push(...q));return out})();
+  const MAXB=8, slow=cap?1.25:1, power=cap?280:400;
+  let t=0;const res=[];let i=0;
+  const perUserTok=new Array(nUsers).fill(0);let totalTok=0,totalJ=0;
+  while(i<qs.length){
+    const batch=[];let startT=Math.max(t,qs[i].arr);
+    while(batch.length<MAXB&&i<qs.length&&qs[i].arr<=startT+0.05){batch.push(qs[i++])}
+    if(!batch.length){t=Math.max(t,qs[i].arr);continue}
+    // prefill each sequentially (linear), then batched decode steps
+    let bt=startT;
+    const pre=bt; // ttft measured from arrival
+    let preMs=0;batch.forEach(r=>preMs+=2+0.15*r.prompt);
+    bt+=preMs/1000*slow;
+    const maxDec=Math.max(...batch.map(r=>r.decode));
+    const stepMs=(3+0.8*batch.length)*slow;
+    bt+=maxDec*stepMs/1000;
+    const e2e=[];
+    batch.forEach(r=>{const ttft=(bt-pre>0)?(pre+ (2+0.15*r.prompt)/1000*slow - r.arr):0;
+      const done=bt;const lat=done-r.arr;
+      res.push({id:r.id,user:r.user,ttft:Math.max(0,(pre+(2+0.15*r.prompt)/1000*slow)-r.arr),e2e:lat});
+      perUserTok[r.user]+=r.decode;totalTok+=r.decode;e2e.push(lat)});
+    totalJ+=power*(bt-startT);
+    t=bt;
+  }
+  return {res,perUserTok,jtok:totalTok?totalJ/totalTok:0,p99:p99(res.map(r=>r.e2e)),jain:jain(perUserTok)};
+}
+function draw(f,f2){const cv=$("cv"),c=cv.getContext("2d");c.clearRect(0,0,cv.width,cv.height);
+  const all=[...f.res,...f2.res];if(!all.length)return;
+  const mx=Math.max(...all.map(r=>r.ttft))*1.1||1;const n=Math.max(f.res.length,f2.res.length);
+  c.strokeStyle="#222c36";c.fillStyle="#8a93a0";c.font="11px system-ui";
+  for(let g=0;g<=4;g++){const y=20+(cv.height-50)*g/4;c.beginPath();c.moveTo(44,y);c.lineTo(cv.width-10,y);c.stroke();
+    c.fillText((mx*(1-g/4)).toFixed(2)+"s",2,y+4)}
+  c.fillText("completion order →",44,cv.height-8);
+  function dots(res,col){c.fillStyle=col;const ord=[...res].sort((a,b)=>a.id-b.id);
+    ord.forEach((r,k)=>{const x=44+(cv.width-60)*(ord.length>1?k/(n-1):0.5);const y=20+(cv.height-50)*(1-r.ttft/mx);
+      c.beginPath();c.arc(x,y,3.2,0,7);c.fill()})}
+  dots(f.res,"#7cc4ff");dots(f2.res,"#C4F03C");
+  c.fillStyle="#7cc4ff";c.fillRect(44,4,10,10);c.fillStyle="#e8ecef";c.fillText("static FIFO",58,13);
+  c.fillStyle="#C4F03C";c.fillRect(140,4,10,10);c.fillStyle="#e8ecef";c.fillText("fair DRR",154,13);
+}
+$("run").onclick=()=>{
+  const rate=+$("rate").value,users=+$("users").value,seed=+$("seed").value,cap=$("cap").checked;
+  const reqs=genReqs(rate,users,seed);
+  const f=simulate(reqs,users,"fifo",cap),fr=simulate(reqs,users,"drr",cap);
+  $("jFifo").textContent=f.jain.toFixed(3);$("jFair").textContent=fr.jain.toFixed(3);
+  $("pFifo").textContent=f.p99.toFixed(2);$("pFair").textContent=fr.p99.toFixed(2);
+  $("eFifo").textContent=f.jtok.toFixed(2);$("eFair").textContent=fr.jtok.toFixed(2);
+  const dp=((f.p99-fr.p99)/Math.max(f.p99,1e-9)*100);
+  $("summary").textContent=`${reqs.length} reqs over 20 s · ${users} users · cap ${cap?"ON (280W)":"OFF (400W)"} · seed ${seed} — fair ${dp>=0?"cuts":"adds"} p99 by ${Math.abs(dp).toFixed(1)}%, Jain ${f.jain.toFixed(3)} → ${fr.jain.toFixed(3)}.`;
+  draw(f,fr);
+  const tb=$("tbl").querySelector("tbody");tb.innerHTML="";
+  for(let u=0;u<users;u++){const tr=document.createElement("tr");tr.innerHTML=`<td>user ${u}</td><td>${f.perUserTok[u]}</td><td>${fr.perUserTok[u]}</td>`;tb.appendChild(tr)}
+};
+$("run").click();
+</script></body></html>

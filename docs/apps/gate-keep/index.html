@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gate-keep — Gated KV + Latent Memory explorer</title>
+<style>
+:root{--bg:#0b0f14;--panel:#11161d;--line:#222c36;--txt:#e8ecef;--acc:#C4F03C;--dim:#8a95a3;--red:#ff6b6b;--cyan:#4ad6ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 system-ui,-apple-system,sans-serif}
+header{padding:28px 20px;text-align:center;background:radial-gradient(800px 280px at 50% -60px,#26331a,#0b0f14)}
+header h1{margin:0;font-size:30px}header h1 span{color:var(--acc)}
+.sub{opacity:.8;max-width:760px;margin:8px auto}
+.back{display:inline-block;margin-top:10px;color:var(--acc);text-decoration:none;border:1px solid var(--line);padding:6px 14px;border-radius:99px}
+.back:hover{border-color:var(--acc)}
+.wrap{max-width:1080px;margin:0 auto;padding:20px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:16px 0}
+.controls{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.ctl{background:#0d1218;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.ctl label{font-size:12px;color:var(--dim);display:block;margin-bottom:4px}
+.ctl output{color:var(--acc);font-weight:700}
+button{background:var(--acc);color:#111;border:0;font-weight:700;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:14px}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+button:hover{filter:brightness(1.1)}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{background:transparent;color:var(--dim);border-radius:0;padding:10px 16px}
+.seg button.on{background:var(--acc);color:#111}
+.grids{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:800px){.grids{grid-template-columns:1fr}}
+canvas.heat{width:100%;background:#000;border-radius:10px;border:1px solid var(--line);image-rendering:pixelated}
+canvas.scores{width:100%;height:54px;background:#0d1218;border:1px solid var(--line);border-radius:10px}
+.metrics{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px}
+.metric{flex:1;min-width:150px;background:#0d1218;border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}
+.metric .v{font-size:24px;font-weight:800;color:var(--acc)}
+.metric .v.bad{color:var(--red)}
+.metric .k{font-size:12px;color:var(--dim)}
+code{background:#000;padding:2px 6px;border-radius:6px;font-size:13px}
+.formula{font-size:13px;color:var(--dim)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:8px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:baseline}
+footer{text-align:center;padding:24px;opacity:.55;font-size:13px}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+<h1>gate-keep <span>explorer</span></h1>
+<p class="sub">Gated KV-cache compression: keep top-budget tokens by attention-mass score, sketch the evicted tail into one latent memory key. Memory beats pure dropping.</p>
+<a class="back" href="../../index.html">&larr; back to portfolio</a>
+</header>
+<div class="wrap">
+
+<div class="panel">
+<div class="controls">
+<div class="ctl"><label>Attention shape</label><div class="seg" id="modeSeg">
+<button data-m="sharp" class="on">sharp (T=0.5)</button><button data-m="diffuse">diffuse (T=2.0)</button>
+</div></div>
+<div class="ctl"><label>Budget (kept tokens) <output id="bOut">8</output></label>
+<input type="range" id="budget" min="4" max="64" value="8" step="1" style="width:180px"></div>
+<button id="btnScore">1 · Score tokens</button>
+<button id="btnCompress" class="ghost">2 · Compress + compare</button>
+<button id="btnNew" class="ghost">regenerate</button>
+</div>
+<p class="formula">Sinks (first 2 cols, StreamingLLM rule) always kept &middot; scores = mean attention per key (H2O-style mass) &middot; memory key = score-weighted barycenter of evicted tail, norm-preserved.</p>
+</div>
+
+<div class="panel">
+<div class="grids">
+<div><h3 style="margin:0 0 8px">Before — full 16&times;32 attention</h3>
+<canvas class="heat" id="cvBefore" width="32" height="16"></canvas>
+<h3 style="margin:12px 0 8px">Token scores <span style="color:var(--dim);font-weight:400;font-size:12px">(lime = kept, red tick = evicted, first 2 = sinks)</span></h3>
+<canvas class="scores" id="cvScores" width="320" height="54"></canvas></div>
+<div><h3 style="margin:0 0 8px">After — kept + 1 latent memory key <span id="afterDims" style="color:var(--dim);font-weight:400;font-size:12px"></span></h3>
+<canvas class="heat" id="cvAfter" width="32" height="16"></canvas>
+<div class="legend">
+<span><span class="sw" style="background:#C4F03C"></span>kept token</span>
+<span><span class="sw" style="background:#4ad6ff"></span>latent memory key</span>
+<span><span class="sw" style="background:#3a1215"></span>evicted (dropped in baseline)</span>
+</div>
+<div class="metrics">
+<div class="metric"><div class="v bad" id="mDrop">—</div><div class="k">drop error (no memory)</div></div>
+<div class="metric"><div class="v" id="mMem">—</div><div class="k">memory error (ours)</div></div>
+<div class="metric"><div class="v" id="mGain">—</div><div class="k">gain %</div></div>
+</div>
+<p class="formula" id="keptList"></p>
+</div>
+</div>
+</div>
+
+<div class="panel">
+<h3 style="margin-top:0">Latent-summary math (simplified, mirrors <code>gate_keep/compress.py</code>)</h3>
+<p class="formula">
+<code>w = softmax(s_evicted / temp)</code> &nbsp;→&nbsp;
+<code>k_bar = Σ wᵢ·Kᵢ</code>, <code>v_bar = Σ wᵢ·Vᵢ</code> (weighted barycenter of tail)<br>
+<code>k_mem = P·Pᵀ·k_bar · (‖k_bar‖/‖P·Pᵀ·k_bar‖)</code> with random orthonormal sketch <code>P</code> (8-d, norm-preserved) — appended as one extra key.<br>
+Error = probe-query attention-output residual: <code>‖attn(K)·V − attn(K')·V'‖ / rms(V)</code>, probe <code>q = mean(K)</code>. Same denominator for drop vs memory, so ordering is fair.
+</p>
+</div>
+
+</div>
+<footer>gate-keep · ridge gate + orthonormal sketch memory · prior art: StreamingLLM / H2O · <a href="../../index.html#gate-keep">portfolio card</a></footer>
+<script>
+"use strict";
+const NK=32, NQ=16, DK=8, DV=8, SINK=2, MEMD=8;
+let mode="sharp", attn=null, K=null, V=null, scores=null, comp=null, budget=8;
+
+function randn(rng){let u=0,v=0;while(!u)u=rng();while(!v)v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function mulberry(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+function genAll(seed){
+  const rng=mulberry(seed);
+  const temp = mode==="sharp"?0.5:2.0;
+  const hh=new Set(); while(hh.size<3) hh.add(SINK+Math.floor(rng()*(NK-SINK)));
+  attn=[];
+  for(let q=0;q<NQ;q++){
+    const logits=[];
+    for(let k=0;k<NK;k++){
+      let l=randn(rng)*1.0;
+      if(k<SINK) l+=2.2;            // attention sinks
+      if(hh.has(k)) l+=1.6;         // heavy hitters
+      logits.push(l/temp);
+    }
+    const m=Math.max(...logits), ex=logits.map(x=>Math.exp(x-m)), s=ex.reduce((a,b)=>a+b,0);
+    attn.push(ex.map(x=>x/s));
+  }
+  K=[];V=[];
+  for(let i=0;i<NK;i++){const r1=[],r2=[];for(let d=0;d<DK;d++){r1.push(randn(rng));r2.push(randn(rng));}K.push(r1);V.push(r2);}
+  scores=null;comp=null;
+}
+function softmaxRowsim(v){const m=Math.max(...v),e=v.map(x=>Math.exp(x-m)),s=e.reduce((a,b)=>a+b,0);return e.map(x=>x/s);}
+function colormap(t){ // 0..1 -> black -> olive -> lime
+  t=Math.max(0,Math.min(1,t));
+  const r=Math.round(12+t*182), g=Math.round(16+t*224), b=Math.round(18+t*42);
+  return `rgb(${r},${g},${b})`;
+}
+function drawHeat(cv,mat,opts){
+  opts=opts||{};
+  const ctx=cv.getContext("2d"), rows=mat.length, cols=mat[0].length;
+  cv.width=cols;cv.height=rows;
+  let mx=0; for(const r of mat)for(const v of r)mx=Math.max(mx,v);
+  mx=mx||1;
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+    const kind=opts.kinds?opts.kinds[x]:"keep";
+    let t=mat[y][x]/mx;
+    if(kind==="evicted"){ctx.fillStyle="#2a1013";}
+    else{ctx.fillStyle=colormap(t);}
+    ctx.fillRect(x,y,1,1);
+    if(kind==="mem"){ctx.fillStyle="#4ad6ff";ctx.fillRect(x,rows-1,1,1);}
+  }
+}
+function drawBefore(){
+  drawHeat(document.getElementById("cvBefore"),attn,{});
+  drawScores(null);
+}
+function drawScores(keptSet){
+  const cv=document.getElementById("cvScores"),ctx=cv.getContext("2d");
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(!scores){ctx.fillStyle="#8a95a3";ctx.font="12px system-ui";ctx.fillText("press “Score tokens”",12,30);return;}
+  const mx=Math.max(...scores), bw=cv.width/NK;
+  for(let i=0;i<NK;i++){
+    const h=(scores[i]/mx)*(cv.height-14);
+    const kept=!keptSet||keptSet.has(i);
+    ctx.fillStyle=i<SINK?"#C4F03C":kept?"#7fae2e":"#ff6b6b";
+    ctx.fillRect(i*bw+1,cv.height-4-h,bw-2,h);
+  }
+}
+function doScore(){
+  scores=new Array(NK).fill(0);
+  for(let q=0;q<NQ;q++)for(let k=0;k<NK;k++)scores[k]+=attn[q][k]/NQ;
+  drawScores(null);
+  comp=null;
+  document.getElementById("mDrop").textContent="—";
+  document.getElementById("mMem").textContent="—";
+  document.getElementById("mGain").textContent="—";
+  document.getElementById("keptList").textContent="scored "+NK+" keys · sinks fixed at first "+SINK+" · now press Compress.";
+}
+function doCompress(){
+  if(!scores)doScore();
+  const b=Math.min(budget,NK);
+  const sinks=[...Array(Math.min(SINK,b)).keys()];
+  const pool=[];for(let i=0;i<NK;i++)if(!sinks.includes(i))pool.push(i);
+  pool.sort((a,c)=>scores[c]-scores[a]);
+  const kept=new Set([...sinks,...pool.slice(0,b-sinks.length)].sort((a,c)=>a-c));
+  const ev=[];for(let i=0;i<NK;i++)if(!kept.has(i))ev.push(i);
+  // softmax weights over evicted scores (temp 1.0, as in compress.py default)
+  const w=softmaxRowsim(ev.map(i=>scores[i]/1.0));
+  const kbar=new Array(DK).fill(0),vbar=new Array(DV).fill(0);
+  ev.forEach((idx,j)=>{for(let d=0;d<DK;d++)kbar[d]+=w[j]*K[idx][d];for(let d=0;d<DV;d++)vbar[d]+=w[j]*V[idx][d];});
+  // simplified orthonormal sketch: random projection energy ~ MEMD/DK -> rescale to preserve norm
+  const nb=Math.hypot(...kbar), shrink=Math.sqrt(Math.min(MEMD,DK)/DK)||1;
+  const kmem=kbar.map(x=>x/(shrink||1));
+  const nr=Math.hypot(...kmem);
+  const kMem=(nr>1e-12&&nb>1e-12)?kmem.map(x=>x*nb/nr):kmem.slice();
+  // probe query = mean key
+  const q=new Array(DK).fill(0);
+  for(let i=0;i<NK;i++)for(let d=0;d<DK;d++)q[d]+=K[i][d]/NK;
+  const sc=1/Math.sqrt(DK);
+  const full=softmaxRowsim(K.map(r=>r.reduce((a,x,i)=>a+x*q[i],0)*sc));
+  let vrms=0;for(let i=0;i<NK;i++)vrms+=V[i].reduce((a,x)=>a+x*x,0);vrms=Math.sqrt(vrms/NK)+1e-9;
+  function outFor(rows,Vr){
+    const l=softmaxRowsim(rows.map(r=>r.reduce((a,x,i)=>a+x*q[i],0)*sc));
+    const o=new Array(DV).fill(0);
+    l.forEach((p,j)=>{for(let d=0;d<DV;d++)o[d]+=p*Vr[j][d];});
+    return o;
+  }
+  const oFull=outFor(K,V);
+  const keptArr=[...kept];
+  const oDrop=outFor(keptArr.map(i=>K[i]),keptArr.map(i=>V[i]));
+  const oMem=outFor([...keptArr.map(i=>K[i]),kMem],[...keptArr.map(i=>V[i]),vbar]);
+  const err=o=>Math.hypot(...o.map((x,d)=>x-oFull[d]))/vrms;
+  const eDrop=err(oDrop),eMem=err(oMem),gain=(eDrop-eMem)/eDrop*100;
+  comp={kept,ev,mem:{kMem,vbar},eDrop,eMem,gain};
+  document.getElementById("mDrop").textContent=eDrop.toFixed(4);
+  document.getElementById("mMem").textContent=eMem.toFixed(4);
+  const g=document.getElementById("mGain");g.textContent=(gain>=0?"+":"")+gain.toFixed(1)+"%";g.style.color=gain>=0?"#C4F03C":"#ff6b6b";
+  // after canvas: kept columns (original order) + 1 memory column = weighted mix of evicted
+  const keptCols=keptArr;
+  const after=attn.map(row=>{
+    const r=keptCols.map(i=>row[i]);
+    let m=0;ev.forEach((idx,j)=>m+=w[j]*row[idx]);r.push(m);return r;
+  });
+  const kinds=[...keptCols.map(()=> "keep"),"mem"];
+  drawHeat(document.getElementById("cvAfter"),after,{kinds});
+  document.getElementById("afterDims").textContent=`— 16×${keptCols.length+1} (kept ${keptCols.length} + mem)`;
+  drawScores(kept);
+  document.getElementById("keptList").textContent=`kept [${keptArr.join(", ")}] · evicted ${ev.length} → 1 latent key · drop err ${eDrop.toFixed(4)} vs mem err ${eMem.toFixed(4)}`;
+}
+document.getElementById("modeSeg").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  mode=b.dataset.m;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle("on",x===b));
+  genAll((Math.random()*1e9)|0);drawBefore();
+  document.getElementById("cvAfter").getContext("2d").clearRect(0,0,32,16);
+});
+document.getElementById("budget").addEventListener("input",e=>{budget=+e.target.value;document.getElementById("bOut").textContent=budget;});
+document.getElementById("btnScore").addEventListener("click",doScore);
+document.getElementById("btnCompress").addEventListener("click",doCompress);
+document.getElementById("btnNew").addEventListener("click",()=>{genAll((Math.random()*1e9)|0);drawBefore();});
+genAll(7);drawBefore();
+</script>
+</body>
+</html>

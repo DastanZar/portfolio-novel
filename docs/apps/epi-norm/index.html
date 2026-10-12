@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>epi-norm — HBM traffic explorer</title>
+<style>
+:root{--bg:#0b0f14;--panel:#11161d;--line:#222c36;--txt:#e8ecef;--acc:#C4F03C;--dim:#8a95a3;--org:#ff9f43;--blu:#4aa8ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 system-ui,-apple-system,sans-serif}
+header{padding:28px 20px;text-align:center;background:radial-gradient(800px 280px at 50% -60px,#26331a,#0b0f14)}
+header h1{margin:0;font-size:30px}header h1 span{color:var(--acc)}
+.sub{opacity:.8;max-width:780px;margin:8px auto}
+.back{display:inline-block;margin-top:10px;color:var(--acc);text-decoration:none;border:1px solid var(--line);padding:6px 14px;border-radius:99px}
+.back:hover{border-color:var(--acc)}
+.wrap{max-width:1080px;margin:0 auto;padding:20px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:16px 0}
+.controls{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.ctl{background:#0d1218;border:1px solid var(--line);border-radius:12px;padding:10px 14px;min-width:170px}
+.ctl label{font-size:12px;color:var(--dim);display:block;margin-bottom:4px}
+.ctl output{color:var(--acc);font-weight:700}
+.ctl input[type=range]{width:170px}
+.switch{display:flex;align-items:center;gap:10px;background:#0d1218;border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer}
+.switch input{width:20px;height:20px;accent-color:#C4F03C}
+.hero{display:grid;grid-template-columns:1fr 2fr;gap:16px;align-items:stretch}
+@media(max-width:800px){.hero{grid-template-columns:1fr}}
+.bignum{background:#0d1218;border:1px solid var(--acc);border-radius:12px;padding:16px;text-align:center}
+.bignum .v{font-size:44px;font-weight:800;color:var(--acc)}
+.bignum .k{font-size:12px;color:var(--dim)}
+canvas#bars{width:100%;background:#0d1218;border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+th,td{padding:8px;border-bottom:1px solid var(--line);text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--dim);font-weight:600}
+td.hl{color:var(--acc);font-weight:700}
+tr.sel td{background:#16210f}
+code{background:#000;padding:2px 6px;border-radius:6px;font-size:12.5px}
+.formula{font-size:13px;color:var(--dim)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:8px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px}
+footer{text-align:center;padding:24px;opacity:.55;font-size:13px}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+<h1>epi-norm <span>HBM explorer</span></h1>
+<p class="sub">RMSNorm + residual + SwiGLU fused into one epilogue. Fuse the forward, then choose: <b>store</b> activations or <b>recompute</b> <code>rrms</code> in backward to save HBM.</p>
+<a class="back" href="../../index.html">&larr; back to portfolio</a>
+</header>
+<div class="wrap">
+
+<div class="panel">
+<div class="controls">
+<div class="ctl"><label>Batch B <output id="oB">2</output></label><input type="range" id="sB" min="1" max="8" step="1" value="2"></div>
+<div class="ctl"><label>Seq T <output id="oT">512</output></label><input type="range" id="sT" min="128" max="1024" step="128" value="512"></div>
+<div class="ctl"><label>Width D <output id="oD">1024</output></label><input type="range" id="sD" min="512" max="2048" step="256" value="1024"></div>
+<label class="switch"><input type="checkbox" id="recompute" checked><span><b>recompute rrms</b> in backward<br><span style="font-size:12px;color:var(--dim)">off = fused-store · on = fused-recompute</span></span></label>
+</div>
+<p class="formula">HBM model: bf16 (2 B/elem) · <code>H = round(2.6875·D)</code> (SwiGLU up-proj, matches receipt H=2752 @ D=1024) · <code>N = B·T</code> tokens. Same analytic accountant as <code>epi_norm/core.py:hbm_accountant</code>.</p>
+</div>
+
+<div class="panel hero">
+<div class="bignum"><div class="v" id="saveBig">—</div><div class="k" id="saveLbl">HBM saved vs baseline</div>
+<div style="margin-top:10px;font-size:13px" id="mbLine"></div></div>
+<div><canvas id="bars" width="640" height="300"></canvas>
+<div class="legend"><span><span class="sw" style="background:#C4F03C"></span>forward traffic</span><span><span class="sw" style="background:#ff9f43"></span>stashed for backward</span><span><span class="sw" style="background:#4aa8ff"></span>backward reload</span></div></div>
+</div>
+
+<div class="panel">
+<h3 style="margin-top:0">Bytes by design <span style="color:var(--dim);font-weight:400;font-size:12px">(selected row = recompute toggle)</span></h3>
+<table id="tbl"><thead><tr><th>design</th><th>forward</th><th>stashed</th><th>backward</th><th>total</th><th>passes</th></tr></thead><tbody></tbody></table>
+<h3>Formulas (elements × 2 B, N = B·T)</h3>
+<p class="formula">
+<code>baseline fwd = N·(7D+2H)</code> — 3 passes: add (2D→D) + norm (D→D) + 2 gate GEMMs (2×D reads, 2H out)<br>
+<code>fused fwd = N·(2D+2H)</code> — 1 pass: read x,res · write gate/up out (same for store &amp; recompute)<br>
+<code>stored: baseline N·(2D+2H) · fused-store N·(D+2H) · fused-recompute N·(D+1)</code> — recompute keeps only fused input + rrms scalar<br>
+<code>bwd: baseline N·(5D+4H) · fused-store N·(3D+4H) · fused-recompute N·(3D+2H+1)</code> — recompute trades ~<code>N·(D+D·H)</code> FLOPs for the stash saving
+</p>
+</div>
+
+</div>
+<footer>epi-norm · fused RMSNorm+residual+SwiGLU epilogue · prior art: Zhang&amp;Sennrich RMSNorm, Liger-Kernel · <a href="../../index.html#epi-norm">portfolio card</a></footer>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+function fmtMB(b){return (b/1e6).toFixed(1)+" MB";}
+function accountant(B,T,D){
+  const H=Math.round(D*2.6875), N=B*T, db=2;
+  const e=x=>Math.round(x)*db;
+  const fwdA=e(N*(7*D+2*H)), fwdBC=e(N*(2*D+2*H));
+  const stA=e(N*(2*D+2*H)), stB=e(N*(D+2*H)), stC=e(N*(D+1));
+  const bwA=e(N*(5*D+4*H)), bwB=e(N*(3*D+4*H)), bwC=e(N*(3*D+2*H+1));
+  const flops=N*(D+D*H);
+  return {H,N,
+    base:{fwd:fwdA,st:stA,bw:bwA,tot:fwdA+stA+bwA,passes:3},
+    store:{fwd:fwdBC,st:stB,bw:bwB,tot:fwdBC+stB+bwB,passes:1},
+    recomp:{fwd:fwdBC,st:stC,bw:bwC,tot:fwdBC+stC+bwC,passes:1,flops}};
+}
+function draw(acc,rec){
+  const cv=$("bars"),ctx=cv.getContext("2d");
+  const W=cv.width,Hh=cv.height;ctx.clearRect(0,0,W,Hh);
+  const rows=[["Baseline · 3 passes",acc.base],["Fused · store all",acc.store],["Fused · recompute rrms",acc.recomp]];
+  const max=Math.max(...rows.map(r=>r[1].tot));
+  const segs=[["fwd","#C4F03C"],["st","#ff9f43"],["bw","#4aa8ff"]];
+  const top=28,bh=44,gap=34,bwMax=W-190;
+  ctx.font="13px system-ui";
+  rows.forEach((r,i)=>{
+    const y=top+i*(bh+gap), d=r[1];let x=170;
+    ctx.fillStyle=i===(rec?2:1)?"#e8ecef":"#8a95a3";
+    ctx.fillText(r[0],8,y+26);
+    segs.forEach(s=>{
+      const w=Math.max(2,d[s[0]]/max*bwMax);
+      ctx.fillStyle=s[1];ctx.fillRect(x,y,w,bh);
+      if(w>64){ctx.fillStyle="#0b0f14";ctx.fillText(fmtMB(d[s[0]]),x+6,y+27);}
+      x+=w;
+    });
+    ctx.fillStyle="#e8ecef";ctx.fillText(fmtMB(d.tot)+" total",x+8,y+27);
+    if(i===(rec?2:1)){ctx.strokeStyle="#C4F03C";ctx.lineWidth=2;ctx.strokeRect(2,y-6,W-4,bh+12);}
+  });
+}
+function update(){
+  const B=+$("sB").value,T=+$("sT").value,D=+$("sD").value,rec=$("recompute").checked;
+  $("oB").textContent=B;$("oT").textContent=T;$("oD").textContent=D;
+  const acc=accountant(B,T,D);
+  draw(acc,rec);
+  const sel=rec?acc.recomp:acc.store;
+  const save=(acc.base.tot-sel.tot)/acc.base.tot*100;
+  $("saveBig").textContent=save.toFixed(1)+"%";
+  $("saveLbl").textContent="HBM saved vs baseline ("+(rec?"fused-recompute":"fused-store")+")";
+  $("mbLine").innerHTML=`<code>${fmtMB(acc.base.tot)} → ${fmtMB(sel.tot)}</code> · N=${acc.N} · H=${acc.H}`+(rec?` · recompute ≈ ${(sel.flops/1e9).toFixed(2)} GFLOP`:"");
+  const tb=document.querySelector("#tbl tbody");
+  const row=(n,d,selr)=>`<tr${selr?' class="sel"':""}><td>${n}</td><td>${fmtMB(d.fwd)}</td><td>${fmtMB(d.st)}</td><td>${fmtMB(d.bw)}</td><td class="hl">${fmtMB(d.tot)}</td><td>${d.passes}</td></tr>`;
+  tb.innerHTML=row("baseline",acc.base,!rec&&false)+row("fused-store",acc.store,!rec)+row("fused-recompute",acc.recomp,rec);
+}
+["sB","sT","sD","recompute"].forEach(id=>$(id).addEventListener("input",update));
+update();
+</script>
+</body>
+</html>
