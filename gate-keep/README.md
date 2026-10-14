@@ -38,3 +38,14 @@ Outputs: `assets/gate_gain.png`, `receipts/receipt.json`.
 - `demos/demo.py` — synthetic benchmark + plot.
 
 See `ATTRIBUTION.md` for citations. All code is original.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- snu-mllab/KVzip (MIT): https://github.com/snu-mllab/KVzip
+- varjoranta/turboquant-vllm (MIT): https://github.com/varjoranta/turboquant-vllm
+via the earlier study repo `DastanZar/kvstamp` (archived; do not present as original).
+
+- Retained: KV eviction + quantization problem.
+- Newly built here (fresh code in this folder, no copied files): ridge-gate predictor + 8-d latent memory instead of drop (+11.8% @ b8).
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

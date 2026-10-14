@@ -41,3 +41,14 @@ python demos/demo.py   # -> assets/ladder.png + receipts/receipt.json
   dequant-overlap term; numbers here are CPU-measured, not copied.
 
 All code is original and CPU-only.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- Infatoshi/KernelBench-Hard (MIT): https://github.com/Infatoshi/KernelBench-Hard
+- JeremyGracey-AI/triton-kernel-lab (MIT): https://github.com/JeremyGracey-AI/triton-kernel-lab
+via the earlier study repo `DastanZar/gembench` (archived; do not present as original).
+
+- Retained: kernel grading harness idea.
+- Newly built here (fresh code in this folder, no copied files): L2-split + dequant-overlap roofline with 95% CIs.
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

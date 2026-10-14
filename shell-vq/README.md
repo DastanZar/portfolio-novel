@@ -78,3 +78,13 @@ floor = rate_distortion_floor(var=3.28, dim=8, bits_per_vec=6.67)
 ## License
 
 MIT — holder Abhinav Chauhan. See `LICENSE`.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- pjmalandrino/llvq (Apache-2.0): https://github.com/pjmalandrino/llvq
+via the earlier study repo `DastanZar/latq` (archived; do not present as original).
+
+- Retained: lattice VQ for sub-2-bit weights.
+- Newly built here (fresh code in this folder, no copied files): quantile radius shells + per-shell scales + gated 1-bit outer residual (64.5% cut).
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

@@ -50,3 +50,14 @@ green-roof green --model llama-3-8b --qps 10 --slo-ms 250
 - KernelSight-LM — kernel-aware LLM inference analysis (naming inspiration).
 
 All code is original and CPU-only (no GPU required; the planner is analytic).
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- dengls24/LLM-para (NOASSERTION): https://github.com/dengls24/LLM-para
+- Giotyp/GPU-Roofline-Python (MIT): https://github.com/Giotyp/GPU-Roofline-Python
+via the earlier study repo `DastanZar/roofline-planner` (archived; do not present as original).
+
+- Retained: roofline capacity math.
+- Newly built here (fresh code in this folder, no copied files): $/J/CO2e + replicas_for_slo autosolver + fair_split + CLI.
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

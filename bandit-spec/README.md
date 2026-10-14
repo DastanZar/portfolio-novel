@@ -47,3 +47,13 @@ python demos/demo.py
   speculative serving); *Not-a-Bandit* no-regret drafting analysis.
 - This project is original work by Abhinav Chauhan (MIT): the per-K
   Beta–Thompson rule with cost-normalized reward plus the p99 SLO veto above.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- lightseekorg/TorchSpec (MIT): https://github.com/lightseekorg/TorchSpec
+via the earlier study repo `DastanZar/sdecode` (archived; do not present as original).
+
+- Retained: draft-verify speculative decoding.
+- Newly built here (fresh code in this folder, no copied files): Thompson bandit over K + p99 SLO veto (regret 13.7, tracks oracle).
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

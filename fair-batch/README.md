@@ -48,3 +48,14 @@ This repo re-implements the *ideas* above from scratch; no code is copied.
 ## License
 
 MIT — see `LICENSE`.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- ovshake/nano-vllm (Apache-2.0): https://github.com/ovshake/nano-vllm
+- pjdurden/nanoserve (NOASSERTION): https://github.com/pjdurden/nanoserve
+via the earlier study repo `DastanZar/cplan` (archived; do not present as original).
+
+- Retained: continuous-batching sim framing.
+- Newly built here (fresh code in this folder, no copied files): DRR fairness + DVFS power + KV admission, Jain 0.950.
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

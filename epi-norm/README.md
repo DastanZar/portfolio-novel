@@ -40,3 +40,13 @@ Outputs: `assets/traffic_sankey.png`, `receipts/receipt.json`.
 - `demos/demo.py` — traffic bar/Sankey-style chart.
 
 All code is original; citations are ideas-only (no code reuse).
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- bassrehab/triton-kernels (MIT): https://github.com/bassrehab/triton-kernels
+via the earlier study repo `DastanZar/fusednorm` (archived; do not present as original).
+
+- Retained: fused Triton norm kernels.
+- Newly built here (fresh code in this folder, no copied files): Norm+residual+SwiGLU epilogue + recompute-vs-store accountant (52.8% HBM saved).
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

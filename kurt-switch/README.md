@@ -82,3 +82,13 @@ blk = quantize_block(matrix)     # per-row adaptive over a 2-D block
 ## License
 
 MIT — holder Abhinav Chauhan. See `LICENSE`.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- pjordanandrsn/grouped-nf4-gemm (MIT): https://github.com/pjordanandrsn/grouped-nf4-gemm
+via the earlier study repo `DastanZar/bithash` (archived; do not present as original).
+
+- Retained: 4-bit grouped quantization problem framing.
+- Newly built here (fresh code in this folder, no copied files): kurtosis-switched 3-codebook + square-law companding + LS scale (fresh code, 79.9% MSE cut).
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

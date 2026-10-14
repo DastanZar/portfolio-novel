@@ -54,3 +54,14 @@ This repo re-implements the *ideas* above from scratch; no code is copied.
 ## License
 
 MIT — see `LICENSE`.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- ovshake/nano-vllm (Apache-2.0): https://github.com/ovshake/nano-vllm
+- AdvayMonga/inference-server (NOASSERTION): https://github.com/AdvayMonga/inference-server
+via the earlier study repo `DastanZar/pagemem` (archived; do not present as original).
+
+- Retained: block-paged KV + COW prefix.
+- Newly built here (fresh code in this folder, no copied files): whole-block attention-minus-frag scoring that actually frees vLLM blocks.
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.

@@ -54,3 +54,13 @@ python demos/demo.py
   Reddit `r/LocalLLaMA` KV-quant discussion thread.
 - This project is original work by Abhinav Chauhan (MIT): the per-block
   format test + integer-bias calibration + fused reference kernel above.
+
+## Provenance & Distillation
+
+Distilled from (verified to exist ):
+- woct0rdho/ComfyUI-FeatherOps (MIT): https://github.com/woct0rdho/ComfyUI-FeatherOps
+via the earlier study repo `DastanZar/softfp8` (archived; do not present as original).
+
+- Retained: low-bit weight-only GEMV motivation.
+- Newly built here (fresh code in this folder, no copied files): per-block E5M2/E4M3 choice + bias 11-19 calibration + fused reference (2x accuracy).
+- License duty: upstream licenses above still apply to any of their code you reuse — this folder is MIT, but keep these credits + links when you publish. Papers/threads cited in prior-art section remain credited.
